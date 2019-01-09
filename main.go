@@ -25,9 +25,12 @@ func main() {
 }
 
 func main1() int {
-	// both lazyFlagParse and flagSet.Parse will exit on error
 	testflags, rest := lazyFlagParse(os.Args[1:])
-	_ = flagSet.Parse(rest)
+	if err := flagSet.Parse(rest); err != nil {
+		fmt.Fprintf(os.Stderr, "flag: %v\n", err)
+		usage()
+		return 2
+	}
 
 	cfg := &packages.Config{Mode: packages.LoadImports}
 	args := flagSet.Args()
@@ -102,7 +105,7 @@ var testFlagDefn = []struct {
 	{Name: "v", BoolVar: true},
 }
 
-var flagSet = flag.NewFlagSet("benchinit", flag.ExitOnError)
+var flagSet = flag.NewFlagSet("benchinit", flag.ContinueOnError)
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `

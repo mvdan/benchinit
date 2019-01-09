@@ -1,0 +1,22 @@
+env HOME=$WORK/home
+
+! benchinit ./withtempfile
+stderr '_test\.go.* already exists'
+
+exec chmod a-w readonlydir
+! benchinit ./readonlydir
+stderr 'permission denied'
+
+! benchinit ./missingpkg
+stderr 'cannot find package'
+
+-- go.mod --
+module test.tld/foo
+-- withtempfile/empty.go --
+package foo
+-- withtempfile/benchinit_generated_test.go --
+package foo
+
+var s = "very important work we cannot delete"
+-- readonlydir/empty.go --
+package foo
