@@ -1,0 +1,16 @@
+env HOME=$WORK/home
+
+benchinit -benchtime=123x -benchmem -memprofile=mem.out -cpuprofile cpu.out .
+stdout '^BenchmarkInit'
+stdout '\s123\s'
+stdout '0 B/op\s*0 allocs/op' # empty init
+! stderr .
+exists mem.out # -memprofile=mem.out
+exists cpu.out # -cpuprofile cpu.out
+
+-- go.mod --
+module test.tld/foo
+-- empty.go --
+package foo
+
+func init() {}

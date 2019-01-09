@@ -1,0 +1,17 @@
+env HOME=$WORK/home
+
+benchinit -benchtime=10x -benchmem .
+stdout '^BenchmarkInit'
+! stdout '0 B/op\s*0 allocs/op' # does alloc
+! stderr .
+
+-- go.mod --
+module test.tld/foo
+-- alloc.go --
+package foo
+
+var Sink []int
+
+func init() {
+	Sink = make([]int, 128)
+}

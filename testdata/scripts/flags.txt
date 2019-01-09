@@ -1,0 +1,24 @@
+env HOME=$WORK/home
+
+! benchinit -h
+! stderr 'flag provided but not defined'
+stderr 'Usage of benchinit'
+stderr 'For example' # definitely includes our help text
+! stderr '-test\.' # don't show the test binary's usage func
+
+# missing flag argument
+! benchinit -cpuprofile
+stderr 'missing argument for flag cpuprofile'
+
+! benchinit -badflag
+stderr 'flag provided but not defined'
+stderr 'Usage of benchinit'
+stderr 'For example' # definitely includes our help text
+! stderr '-test\.' # don't show the test binary's usage func
+
+-- go.mod --
+module test.tld/foo
+-- empty.go --
+package foo
+
+func init() {}

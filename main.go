@@ -16,15 +16,27 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
+func init() {
+	flagSet.Usage = usage
+}
+
 func main() {
 	os.Exit(main1())
 }
 
 func main1() int {
-	testflags, rest := lazyFlagParse(os.Args[1:]) // will exit on error
+	// both lazyFlagParse and flagSet.Parse will exit on error
+	testflags, rest := lazyFlagParse(os.Args[1:])
+	_ = flagSet.Parse(rest)
 
 	cfg := &packages.Config{Mode: packages.LoadImports}
-	pkgs, err := packages.Load(cfg, rest...)
+	args := flagSet.Args()
+	if len(args) == 0 {
+		// TODO: remove once go/packages treats Load() like Load(".")
+		// in the 'go list' driver.
+		args = []string{"."}
+	}
+	pkgs, err := packages.Load(cfg, args...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load: %v\n", err)
 		return 1
@@ -32,7 +44,7 @@ func main1() int {
 	if packages.PrintErrors(pkgs) > 0 {
 		return 1
 	}
-	fmt.Println(pkgs)
+	exitCode := 0
 
 	for _, pkg := range pkgs {
 		status := "ok"
@@ -41,10 +53,11 @@ func main1() int {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "benchmark: %v\n", err)
 			status = "FAIL"
+			exitCode = 1
 		}
 		fmt.Printf("%s\t%s\t%s\n", status, pkg.PkgPath, time.Since(start))
 	}
-	return 0
+	return exitCode
 }
 
 // testFlag is copied from cmd/go/internal/test/testflag.go's testFlagDefn, with
@@ -89,6 +102,23 @@ var testFlagDefn = []struct {
 	{Name: "v", BoolVar: true},
 }
 
+var flagSet = flag.NewFlagSet("benchinit", flag.ExitOnError)
+
+func usage() {
+	fmt.Fprintf(os.Stderr, `
+Usage of benchinit:
+
+	benchinit [benchinit flags] [go test flags] [packages]
+
+For example:
+
+	benchinit -benchmem -count=10 .
+
+All flags accepted by 'go test', including the benchmarking ones, should be
+accepted. See 'go help testflag' for a complete list.
+`[1:])
+}
+
 // lazyFlagParse is similar to flag.Parse, but keeps 'go test' flags around so
 // they can be passed on. We'll add our own benchinit flags at a later time.
 func lazyFlagParse(args []string) (testflags, rest []string) {
@@ -114,8 +144,8 @@ _args:
 				continue _args
 			}
 		}
-		fmt.Fprintf(os.Stderr, "flag provided but not defined: %s\n", arg)
-		flag.Usage() // exits by default
+		// Likely one of our flags. Leave it to flagSet.Parse.
+		rest = append(rest, arg)
 	}
 	return testflags, rest
 }
@@ -150,7 +180,10 @@ func benchmark(pkg *packages.Package, testflags []string) error {
 		"-bench=^BenchmarkInit$", // only run the one benchmark
 	}
 	flags = append(flags, testflags...) // add the user's test flags
-	flags = append(flags, ".")          // be explicit about the package
+
+	// Don't add "." for the package, as that can lead to missing flag args
+	// being misparsed. For example, 'benchinit -count' could execute as
+	// 'benchinit -count=.'.
 
 	cmd := exec.Command("go", flags...)
 	cmd.Dir = pkgDir
