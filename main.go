@@ -30,8 +30,10 @@ func main() {
 func main1() int {
 	testflags, rest := lazyFlagParse(os.Args[1:])
 	if err := flagSet.Parse(rest); err != nil {
-		fmt.Fprintf(os.Stderr, "flag: %v\n", err)
-		usage()
+		if err != flag.ErrHelp {
+			fmt.Fprintf(os.Stderr, "flag: %v\n", err)
+			usage()
+		}
 		return 2
 	}
 

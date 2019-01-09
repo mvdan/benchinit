@@ -4,6 +4,7 @@ env HOME=$WORK/home
 ! stderr 'flag provided but not defined'
 stderr 'Usage of benchinit'
 stderr 'For example' # definitely includes our help text
+! stderr 'help requested' # don't duplicate usage output
 ! stderr '-test\.' # don't show the test binary's usage func
 
 ! benchinit -benchtime=10x -badflag
