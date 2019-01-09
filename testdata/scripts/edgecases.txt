@@ -1,13 +1,13 @@
 env HOME=$WORK/home
 
-! benchinit ./withtempfile
+! benchinit -benchtime=10x ./withtempfile
 stderr '_test\.go.* already exists'
 
 exec chmod a-w readonlydir
-! benchinit ./readonlydir
+! benchinit -benchtime=10x ./readonlydir
 stderr 'permission denied'
 
-! benchinit ./missingpkg
+! benchinit -benchtime=10x ./missingpkg
 stderr 'cannot find package'
 
 -- go.mod --

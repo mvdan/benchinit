@@ -1,0 +1,14 @@
+env HOME=$WORK/home
+
+benchinit -benchtime=10x ./noinit
+stdout '^BenchmarkInit'
+! stderr .
+
+-- go.mod --
+module test.tld/foo
+-- noinit/empty.go --
+package foo
+-- withinit/empty.go --
+package foo
+
+func init() {}
