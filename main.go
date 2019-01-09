@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
-	"time"
 
 	"golang.org/x/tools/go/packages"
 )
@@ -47,20 +46,20 @@ func main1() int {
 	if packages.PrintErrors(pkgs) > 0 {
 		return 1
 	}
-	exitCode := 0
 
 	for _, pkg := range pkgs {
-		status := "ok"
-		start := time.Now()
-		err := benchmark(pkg, testflags)
+		cleanup, err := setup(pkg)
+		defer cleanup()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "benchmark: %v\n", err)
-			status = "FAIL"
-			exitCode = 1
+			return 1
 		}
-		fmt.Printf("%s\t%s\t%s\n", status, pkg.PkgPath, time.Since(start))
 	}
-	return exitCode
+
+	if err := benchmark(pkgs, testflags); err != nil {
+		return 1
+	}
+	return 0
 }
 
 // testFlag is copied from cmd/go/internal/test/testflag.go's testFlagDefn, with
@@ -134,12 +133,17 @@ _args:
 		}
 		for _, tflag := range testFlagDefn {
 			if arg[1:] == tflag.Name {
-				testflags = append(testflags, arg)
-				if !tflag.BoolVar && i+1 < len(args) {
-					// e.g. -count 10
-					i++
-					testflags = append(testflags, args[i])
+				if tflag.BoolVar {
+					// e.g. -benchmem
+					testflags = append(testflags, arg)
+					continue _args
 				}
+				next := ""
+				if i+1 < len(args) {
+					i++
+					next = args[i]
+				}
+				testflags = append(testflags, arg, next)
 				continue _args
 			} else if strings.HasPrefix(arg[1:], tflag.Name+"=") {
 				// e.g. -count=10
@@ -153,43 +157,63 @@ _args:
 	return testflags, rest
 }
 
-func benchmark(pkg *packages.Package, testflags []string) error {
+const (
+	benchFile = "benchinit_generated_test.go"
+	stubFile  = "benchinit_generated_stub.go"
+)
+
+func setup(pkg *packages.Package) (cleanup func(), _ error) {
+	var toDelete []string
+
+	cleanup = func() {
+		for _, path := range toDelete {
+			if err := os.Remove(path); err != nil {
+				// TODO: return the error instead? how likely is
+				// it to happen?
+				panic(err)
+			}
+		}
+	}
+
 	// Place the benchmark file in the same package, to ensure that we can
 	// also benchmark transitive internal dependencies.
 	// We assume 'go list' packages; all package files in the same directory.
 	// TODO: since we use go/packages, add support for other build systems
 	// and test it.
-	pkgDir := filepath.Dir(pkg.GoFiles[0])
-	benchFile := filepath.Join(pkgDir, "benchinit_generated_test.go")
-	if err := templateFile(benchFile, benchTmpl, pkg); err != nil {
-		return err
+	dir := filepath.Dir(pkg.GoFiles[0])
+	bench := filepath.Join(dir, benchFile)
+	if err := templateFile(bench, benchTmpl, pkg); err != nil {
+		return cleanup, err
 	}
-	defer os.Remove(benchFile)
+	toDelete = append(toDelete, bench)
 
-	stubFile := filepath.Join(pkgDir, "benchinit_init_stub.go")
-	if err := templateFile(stubFile, stubTmpl, pkg); err != nil {
-		return err
+	stub := filepath.Join(dir, stubFile)
+	if err := templateFile(stub, stubTmpl, pkg); err != nil {
+		return cleanup, err
 	}
-	defer os.Remove(stubFile)
+	toDelete = append(toDelete, stub)
+	return cleanup, nil
+}
 
-	flags := []string{"test",
+func benchmark(pkgs []*packages.Package, testflags []string) error {
+	args := []string{"test",
 		"-run=^$",                // disable all tests
 		"-bench=^BenchmarkInit$", // only run the one benchmark
 	}
-	flags = append(flags, testflags...) // add the user's test flags
+	args = append(args, testflags...) // add the user's test args
 
-	// Don't add "." for the package, as that can lead to missing flag args
-	// being misparsed. For example, 'benchinit -count' could execute as
-	// 'benchinit -count=.'.
+	// Separate the flags from the packages, to ensure they are parsed
+	// properly by cmd/go.
+	//args = append(args, "--")
 
-	cmd := exec.Command("go", flags...)
-	cmd.Dir = pkgDir
+	for _, pkg := range pkgs {
+		args = append(args, pkg.PkgPath)
+	}
+
+	cmd := exec.Command("go", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-	return nil
+	return cmd.Run()
 }
 
 // templateFile creates a file at path and fills its contents with the

@@ -1,10 +1,7 @@
 Must do:
 * support recursive benchmarks, including dependencies
-* make benchinit respect some high-level flags like -failfast
 
 Perhaps do:
 * check that packages have no BenchmarkInit already (but would the error be much
   better than now?)
 * make -benchmem a default argument
-* do a single 'go test -bench' invocation overall, not one per package (should
-  fix the -failfast issue above?)

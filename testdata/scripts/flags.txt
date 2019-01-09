@@ -1,20 +1,21 @@
 env HOME=$WORK/home
 
-! benchinit -h
+! benchinit -benchtime=10x -h
 ! stderr 'flag provided but not defined'
 stderr 'Usage of benchinit'
 stderr 'For example' # definitely includes our help text
 ! stderr '-test\.' # don't show the test binary's usage func
 
-# missing flag argument
-! benchinit -cpuprofile
-stderr 'missing argument for flag cpuprofile'
-
-! benchinit -badflag
+! benchinit -benchtime=10x -badflag
 stderr 'flag provided but not defined'
 stderr 'Usage of benchinit'
 stderr 'For example' # definitely includes our help text
 ! stderr '-test\.' # don't show the test binary's usage func
+
+# missing flag argument
+benchinit -benchtime=10x -cpuprofile
+stdout '^BenchmarkInit'
+! stderr 'missing argument' # we pass it along like -cpuprofile=""
 
 -- go.mod --
 module test.tld/foo

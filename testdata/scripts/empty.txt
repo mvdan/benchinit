@@ -3,12 +3,14 @@ env HOME=$WORK/home
 benchinit -benchtime=10x .
 stdout '^BenchmarkInit'
 stdout 'ns/op$' # no-op bench shouldn't take tens of ms
-stdout '^ok\ttest\.tld/foo'
+stdout '^ok\s*test\.tld/foo'
 ! stderr .
 
 # check that we didn't leave any temp files behind
 ! exists benchinit_generated_test.go
 ! exists benchinit_init_stub.go
+! exists foo
+! exists foo.test
 
 -- go.mod --
 module test.tld/foo
