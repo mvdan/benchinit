@@ -1,0 +1,37 @@
+env HOME=$WORK/home
+
+benchinit -r -benchtime=10x .
+stdout '^BenchmarkInit'
+
+-- go.mod --
+module test.tld/foo
+-- import.go --
+package foo
+
+import (
+	// these cause issues. 
+	_ "runtime"
+	_ "testing"
+
+	// these surprisingly don't. perhaps we need better tests.
+	_ "unsafe"
+	"sync"
+	_ "sync/atomic"
+	_ "errors"
+	_ "io"
+	_ "runtime/debug"
+	_ "runtime/pprof"
+	_ "runtime/trace"
+	_ "time"
+	_ "syscall"
+	_ "os"
+)
+
+var (
+	fooOnce sync.Once
+	foo     bool
+)
+
+func init() {
+	fooOnce.Do(func() { foo = true })
+}

@@ -1,0 +1,24 @@
+env HOME=$WORK/home
+
+benchinit -benchtime=10x .
+stdout '^BenchmarkInit'
+stdout '0 B/op\s*0 allocs/op' # doesn't alloc
+
+benchinit -r -benchtime=10x .
+stdout '^BenchmarkInit'
+! stdout '0 B/op\s*0 allocs/op' # imported pkg allocs
+
+-- go.mod --
+module test.tld/foo
+-- import.go --
+package foo
+
+import _ "test.tld/foo/bar"
+-- bar/alloc.go --
+package bar
+
+var Sink []int
+
+func init() {
+	Sink = make([]int, 128)
+}
