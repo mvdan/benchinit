@@ -1,0 +1,13 @@
+env HOME=$WORK/home
+
+benchinit -benchtime=10x .
+stdout '^BenchmarkInit'
+stdout 'ns/op$' # no-op bench shouldn't take tens of ms
+stdout '^ok\ttest\.tld/foo'
+! stderr .
+-- go.mod --
+module test.tld/foo
+-- foo.go --
+package foo
+
+func init() {}
