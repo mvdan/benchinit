@@ -2,7 +2,7 @@ env HOME=$WORK/home
 
 benchinit -benchtime=10x .
 stdout '^BenchmarkInit'
-stdout 'ns/op$' # no-op bench shouldn't take tens of ms
+stdout '\sns/op\s' # no-op bench shouldn't take tens of ms
 stdout '^ok\s*test\.tld/foo'
 ! stderr .
 

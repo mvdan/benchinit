@@ -114,7 +114,7 @@ Usage of benchinit:
 
 For example:
 
-	benchinit -benchmem -count=10 .
+	benchinit -count=10 .
 
 All flags accepted by 'go test', including the benchmarking ones, should be
 accepted. See 'go help testflag' for a complete list.
@@ -253,6 +253,9 @@ var _initdone uint8
 func _init()
 
 func BenchmarkInit(b *testing.B) {
+	// Allocs tend to matter too, and have no downsides.
+	b.ReportAllocs()
+
         for i := 0; i < b.N; i++ {
                 _initdone = 0
                 _init()
