@@ -1,6 +1,2 @@
 Must do:
 * support recursive benchmarks, including dependencies
-
-Perhaps do:
-* check that packages have no BenchmarkInit already (but would the error be much
-  better than now?)

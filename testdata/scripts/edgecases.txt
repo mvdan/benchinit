@@ -10,6 +10,16 @@ stderr 'permission denied'
 ! benchinit -benchtime=10x ./missingpkg
 stderr 'cannot find package'
 
+! benchinit -benchtime=10x ./missingpkg
+stderr 'cannot find package'
+
+benchinit -benchtime=10x ./onlytestfiles
+! stdout '^BenchmarkInit' # nothing to benchmark
+stdout 'ok\s*test.tld/foo/onlytestfiles'
+
+! benchinit -benchtime=10x ./withbenchmarkinit
+stderr 'BenchmarkInit redeclared'
+
 -- go.mod --
 module test.tld/foo
 -- withtempfile/empty.go --
@@ -20,3 +30,14 @@ package foo
 var s = "very important work we cannot delete"
 -- readonlydir/empty.go --
 package foo
+-- onlytestfiles/empty_test.go --
+package foo
+-- withbenchmarkinit/empty.go --
+package foo
+-- withbenchmarkinit/bench_test.go --
+package foo_test
+
+import "testing"
+
+func BenchmarkInit(b *testing.B) {
+}

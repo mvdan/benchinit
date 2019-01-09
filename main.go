@@ -163,6 +163,13 @@ const (
 )
 
 func setup(pkg *packages.Package) (cleanup func(), _ error) {
+	if len(pkg.GoFiles) == 0 {
+		// No non-test Go files; no init work to benchmark. Do nothing,
+		// and the 'go test -bench' command later will do little work
+		// here.
+		return func() {}, nil
+	}
+
 	var toDelete []string
 
 	cleanup = func() {
