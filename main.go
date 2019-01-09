@@ -198,6 +198,7 @@ func setup(pkg *packages.Package) (cleanup func(), _ error) {
 func benchmark(pkgs []*packages.Package, testflags []string) error {
 	args := []string{"test",
 		"-run=^$",                // disable all tests
+		"-vet=off",               // disable vet
 		"-bench=^BenchmarkInit$", // only run the one benchmark
 	}
 	args = append(args, testflags...) // add the user's test args
