@@ -45,7 +45,6 @@ func init() {
 
 	signal.Notify(sign, os.Interrupt)
 
-	// TODO: fix this; the global isn't being zeroed by init.
-	// var b bool
-	// flagSet.BoolVar(&b, "i", false, "")
+	var b bool
+	flagSet.BoolVar(&b, "i", false, "")
 }
