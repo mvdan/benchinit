@@ -6,9 +6,11 @@ package main
 import (
 	"flag"
 	"fmt"
+	"go/types"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"text/template"
 
@@ -37,7 +39,7 @@ func main1() int {
 		return 2
 	}
 
-	cfg := &packages.Config{Mode: packages.LoadImports}
+	cfg := &packages.Config{Mode: packages.LoadAllSyntax}
 	args := flagSet.Args()
 	if len(args) == 0 {
 		// TODO: remove once go/packages treats Load() like Load(".")
@@ -168,6 +170,8 @@ const (
 	stubFile  = "benchinit_generated_stub.go"
 )
 
+var sizeOf = types.SizesFor("gc", runtime.GOARCH).Sizeof
+
 func setup(pkg *packages.Package) (cleanup func(), _ error) {
 	if len(pkg.GoFiles) == 0 {
 		// No non-test Go files; no init work to benchmark. Do nothing,
@@ -201,6 +205,18 @@ func setup(pkg *packages.Package) (cleanup func(), _ error) {
 	}
 	if *recursive {
 		data.Inits = benchmarkablePkgs(pkg)
+	}
+
+	scope := pkg.Types.Scope()
+	for _, name := range scope.Names() {
+		v, ok := scope.Lookup(name).(*types.Var)
+		if !ok {
+			continue
+		}
+
+		data.Globals = append(data.Globals, globalSymbol{
+			pkg.PkgPath, name, sizeOf(v.Type()),
+		})
 	}
 
 	bench := filepath.Join(dir, benchFile)
@@ -279,6 +295,13 @@ type tmplData struct {
 	// import paths of transitive dependencies too, excluding the ones whose
 	// initdone we can't mess with.
 	Inits []string
+
+	Globals []globalSymbol
+}
+
+type globalSymbol struct {
+	Path, Name string
+	Size       int64
 }
 
 var benchTmpl = template.Must(template.New("").Parse(`
@@ -292,9 +315,16 @@ import (
         "testing"
         _ "unsafe" // must import unsafe to use go:linkname
 )
+
 {{ range $i, $path := .Inits }}
 //go:linkname _initdone{{$i}} {{$path}}.initdone·
 var _initdone{{$i}} uint8
+{{- end }}
+
+
+{{ range $i, $g := .Globals }}
+//go:linkname _globalvar{{$i}} {{$g.Path}}.{{$g.Name}}
+var _globalvar{{$i}} [{{$g.Size}}]byte
 {{- end }}
 
 //go:linkname _init {{.PkgPath}}.init
@@ -304,12 +334,17 @@ func BenchmarkInit(b *testing.B) {
 	// Allocs tend to matter too, and have no downsides.
 	b.ReportAllocs()
 
-        for i := 0; i < b.N; i++ {
-{{ range $i, $_ := .Inits }}
-                _initdone{{$i}} = 0
-{{- end }}
-                _init()
-        }
+	for i := 0; i < b.N; i++ {
+		{{ range $i, $g := .Globals }}
+		_globalvar{{$i}} = [{{$g.Size}}]byte{}
+		{{ end }}
+
+		{{ range $i, $_ := .Inits }}
+		_initdone{{$i}} = 0
+		{{- end }}
+
+		_init()
+	}
 }
 `[1:]))
 
