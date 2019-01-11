@@ -310,42 +310,48 @@ var benchTmpl = template.Must(template.New("").Parse(`
 package {{.Name}}_test
 
 import (
-	// no need to import the benchmarked packages?
-
-        "testing"
-        _ "unsafe" // must import unsafe to use go:linkname
+	"testing"
+	_ "unsafe" // must import unsafe to use go:linkname
 )
-
-{{ range $i, $path := .Inits }}
-//go:linkname _initdone{{$i}} {{$path}}.initdone·
-var _initdone{{$i}} uint8
-{{- end }}
-
-
-{{ range $i, $g := .Globals }}
-//go:linkname _globalvar{{$i}} {{$g.Path}}.{{$g.Name}}
-var _globalvar{{$i}} [{{$g.Size}}]byte
-{{- end }}
-
-//go:linkname _init {{.PkgPath}}.init
-func _init()
 
 func BenchmarkInit(b *testing.B) {
 	// Allocs tend to matter too, and have no downsides.
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		{{ range $i, $g := .Globals }}
-		_globalvar{{$i}} = [{{$g.Size}}]byte{}
-		{{ end }}
-
-		{{ range $i, $_ := .Inits }}
-		_initdone{{$i}} = 0
-		{{- end }}
-
+		b.StartTimer()
 		_init()
+		b.StopTimer()
+
+		deinit() // get ready to run init again
 	}
 }
+
+// deinit undoes the work that the init functions being benchmarked do. In
+// particular, their globals are zeroed, and "initdone" is set to 0 to get init
+// to do work again.
+func deinit() {
+	{{- range $i, $g := .Globals }}
+	_globalvar{{$i}} = [{{$g.Size}}]byte{}
+	{{- end }}
+
+	{{- range $i, $_ := .Inits }}
+	_initdone{{$i}} = 0
+	{{- end }}
+}
+
+//go:linkname _init {{.PkgPath}}.init
+func _init()
+
+{{ range $i, $g := .Globals }}
+//go:linkname _globalvar{{$i}} {{$g.Path}}.{{$g.Name}}
+var _globalvar{{$i}} [{{$g.Size}}]byte
+{{- end }}
+
+{{- range $i, $path := .Inits }}
+//go:linkname _initdone{{$i}} {{$path}}.initdone·
+var _initdone{{$i}} uint8
+{{- end }}
 `[1:]))
 
 var stubTmpl = template.Must(template.New("").Parse(`
