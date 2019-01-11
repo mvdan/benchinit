@@ -2,6 +2,7 @@ env HOME=$WORK/home
 
 benchinit -r -benchtime=10x .
 stdout '^BenchmarkInit'
+! stdout ' -[0-9].*/op' # initialising "time" again can lead to negative durations
 
 -- go.mod --
 module test.tld/foo
@@ -9,12 +10,15 @@ module test.tld/foo
 package foo
 
 import (
-	// these cause issues. 
+	// these can cause issues.
 	_ "runtime"
 	_ "testing"
+	"os/signal"
+	"flag"
 
-	// these surprisingly don't. perhaps we need better tests.
+	// these surprisingly don't. perhaps we need more code below.
 	_ "unsafe"
+	"os"
 	"sync"
 	_ "sync/atomic"
 	_ "errors"
@@ -24,14 +28,24 @@ import (
 	_ "runtime/trace"
 	_ "time"
 	_ "syscall"
-	_ "os"
+	_ "fmt"
 )
 
 var (
 	fooOnce sync.Once
 	foo     bool
+
+	sign = make(chan os.Signal, 1)
+
+	flagSet flag.FlagSet
 )
 
 func init() {
 	fooOnce.Do(func() { foo = true })
+
+	signal.Notify(sign, os.Interrupt)
+
+	// TODO: fix this; the global isn't being zeroed by init.
+	// var b bool
+	// flagSet.BoolVar(&b, "i", false, "")
 }

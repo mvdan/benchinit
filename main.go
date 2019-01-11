@@ -240,7 +240,9 @@ func benchmarkablePkgs(roots ...*packages.Package) []string {
 	packages.Visit(roots, func(pkg *packages.Package) bool {
 		switch pkg.PkgPath {
 		case "runtime", // messes up everything
-			"testing": // messes up the benchmark
+			"testing",   // messes up the benchmark itself
+			"os/signal", // messes up signal.Notify
+			"time":      // messes up monotonic times
 			// skip their imports as well.
 			return false
 		}
@@ -290,11 +292,10 @@ import (
         "testing"
         _ "unsafe" // must import unsafe to use go:linkname
 )
-
 {{ range $i, $path := .Inits }}
 //go:linkname _initdone{{$i}} {{$path}}.initdone·
 var _initdone{{$i}} uint8
-{{ end }}
+{{- end }}
 
 //go:linkname _init {{.PkgPath}}.init
 func _init()
@@ -306,7 +307,7 @@ func BenchmarkInit(b *testing.B) {
         for i := 0; i < b.N; i++ {
 {{ range $i, $_ := .Inits }}
                 _initdone{{$i}} = 0
-{{ end }}
+{{- end }}
                 _init()
         }
 }
