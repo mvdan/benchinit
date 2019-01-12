@@ -40,13 +40,7 @@ func main1() int {
 	}
 
 	cfg := &packages.Config{Mode: packages.LoadAllSyntax}
-	args := flagSet.Args()
-	if len(args) == 0 {
-		// TODO: remove once go/packages treats Load() like Load(".")
-		// in the 'go list' driver.
-		args = []string{"."}
-	}
-	pkgs, err := packages.Load(cfg, args...)
+	pkgs, err := packages.Load(cfg, flagSet.Args()...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load: %v\n", err)
 		return 1
