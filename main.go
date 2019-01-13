@@ -58,7 +58,21 @@ func main1() int {
 		}
 	}
 
-	if err := benchmark(pkgs, testflags); err != nil {
+	args := []string{"test",
+		"-run=^$",                // disable all tests
+		"-vet=off",               // disable vet
+		"-bench=^BenchmarkInit$", // only run the one benchmark
+	}
+	args = append(args, testflags...) // add the user's test args
+	for _, pkg := range pkgs {
+		args = append(args, pkg.PkgPath)
+	}
+	cmd := exec.Command("go", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		// TODO: use ExitError.ExitCode() once we only support 1.12 and
+		// later.
 		return 1
 	}
 	return 0
@@ -274,24 +288,6 @@ func fieldByName(st *types.Struct, name string) (vr *types.Var, offset int64) {
 		}
 	}
 	return nil, 0
-}
-
-func benchmark(pkgs []*packages.Package, testflags []string) error {
-	args := []string{"test",
-		"-run=^$",                // disable all tests
-		"-vet=off",               // disable vet
-		"-bench=^BenchmarkInit$", // only run the one benchmark
-	}
-	args = append(args, testflags...) // add the user's test args
-
-	for _, pkg := range pkgs {
-		args = append(args, pkg.PkgPath)
-	}
-
-	cmd := exec.Command("go", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
 }
 
 // templateFile creates a file at path and fills its contents with the
