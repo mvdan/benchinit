@@ -30,6 +30,7 @@ func main() {
 }
 
 func main1() int {
+	// Figure out which flags should be passed on to 'go test'.
 	testflags, rest := lazyFlagParse(os.Args[1:])
 	if err := flagSet.Parse(rest); err != nil {
 		if err != flag.ErrHelp {
@@ -39,6 +40,7 @@ func main1() int {
 		return 2
 	}
 
+	// Load the packages.
 	cfg := &packages.Config{Mode: packages.LoadAllSyntax}
 	pkgs, err := packages.Load(cfg, flagSet.Args()...)
 	if err != nil {
@@ -49,6 +51,7 @@ func main1() int {
 		return 1
 	}
 
+	// Prepare the packages to be benchmarked.
 	for _, pkg := range pkgs {
 		cleanup, err := setup(pkg)
 		defer cleanup()
@@ -58,6 +61,7 @@ func main1() int {
 		}
 	}
 
+	// Benchmark the packages with 'go test -bench'.
 	args := []string{"test",
 		"-run=^$",                // disable all tests
 		"-vet=off",               // disable vet
@@ -178,6 +182,9 @@ const (
 	stubFile  = "benchinit_generated_stub.go"
 )
 
+// setup prepares a package to be benchmarked. In particular, a number of
+// temporary generated files are added to its directory on disk, to add the
+// necessary BenchmarkInit function and all other necessary pieces.
 func setup(pkg *packages.Package) (cleanup func(), _ error) {
 	if len(pkg.GoFiles) == 0 {
 		// No non-test Go files; no init work to benchmark. Do nothing,
@@ -278,6 +285,8 @@ var globalsToZero = [...]func(types.Type) toZero{
 	},
 }
 
+// fieldByName finds a struct's field by name, returning the field and its
+// offset within the struct.
 func fieldByName(st *types.Struct, name string) (vr *types.Var, offset int64) {
 	var fields []*types.Var
 	for i := 0; i < st.NumFields(); i++ {
