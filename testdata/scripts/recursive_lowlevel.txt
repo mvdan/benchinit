@@ -30,7 +30,7 @@ import (
 	_ "syscall"
 	_ "fmt"
 
-        _ "test.tld/foo/imported"
+	_ "test.tld/foo/imported"
 )
 
 var (
@@ -66,8 +66,21 @@ import "flag"
 
 var flagSet flag.FlagSet
 
+type withFlagset struct {
+	withFlagset2
+}
+
+type withFlagset2 struct {
+	Flag flag.FlagSet
+}
+
+var flagSet2 withFlagset
+
 func init() {
 	var b bool
 	// Check that we zero these in dependencies too, when in recursive mode.
 	flagSet.BoolVar(&b, "i", false, "")
+
+	// Check that we zero the flagset's field when nested, too.
+	flagSet2.Flag.BoolVar(&b, "i2", false, "")
 }

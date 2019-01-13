@@ -269,20 +269,47 @@ var sizes = types.SizesFor("gc", runtime.GOARCH)
 
 // globalsToZero is a list of functions that look for subsets of bytes within
 // globals that need zeroing between init calls.
+// TODO: support many fields to zero, i.e. []toZero
 var globalsToZero = [...]func(types.Type) toZero{
 	// Zero flag.FlagSet struct's "formal" field to avoid "flag redefined"
 	// panics.
 	func(t types.Type) toZero {
-		if t.String() != "flag.FlagSet" {
+		t2, offs1 := lookupByType(t, "flag.FlagSet", 0)
+		if t2 == nil {
 			return dontZero
 		}
-		st := t.Underlying().(*types.Struct)
-		field, offset := fieldByName(st, "formal")
+		st := t2.Underlying().(*types.Struct)
+		field, offs2 := fieldByName(st, "formal")
 		return toZero{
-			Offset:   offset,
+			Offset:   offs1 + offs2,
 			ZeroSize: sizes.Sizeof(field.Type()),
 		}
 	},
+}
+
+func lookupByType(t types.Type, tname string, baseOffs int64) (_ types.Type, offset int64) {
+	if t.String() == tname {
+		return t, baseOffs
+	}
+	switch t := t.Underlying().(type) {
+	case *types.Struct:
+		var fields []*types.Var
+		for i := 0; i < t.NumFields(); i++ {
+			field := t.Field(i)
+			fields = append(fields, field)
+			t2 := field.Type()
+
+			// TODO: quadratic work. perhaps replace with Alignof+Offsetof.
+			offset := baseOffs + sizes.Offsetsof(fields)[i]
+			if t2.String() == tname {
+				return field.Type(), offset
+			}
+			if t3, offset := lookupByType(t2, tname, offset); t3 != nil {
+				return t3, offset
+			}
+		}
+	}
+	return nil, 0
 }
 
 // fieldByName finds a struct's field by name, returning the field and its
