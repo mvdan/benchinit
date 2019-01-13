@@ -164,7 +164,7 @@ const (
 	stubFile  = "benchinit_generated_stub.go"
 )
 
-var sizeOf = types.SizesFor("gc", runtime.GOARCH).Sizeof
+var sizes = types.SizesFor("gc", runtime.GOARCH)
 
 func setup(pkg *packages.Package) (cleanup func(), _ error) {
 	if len(pkg.GoFiles) == 0 {
@@ -207,10 +207,33 @@ func setup(pkg *packages.Package) (cleanup func(), _ error) {
 		if !ok {
 			continue
 		}
+		switch t := v.Type(); t.String() {
+		case "flag.FlagSet":
+			st := t.Underlying().(*types.Struct)
+			var fields []*types.Var
+			var field *types.Var
+			index := -1
+			for i := 0; i < st.NumFields(); i++ {
+				field = st.Field(i)
+				if field.Name() == "formal" {
+					index = i
+					// continue so that we grab all fields
+				}
+				fields = append(fields, field)
+			}
+			if index == -1 {
+				panic("field not found")
+			}
+			offsets := sizes.Offsetsof(fields)
+			data.ToZero = append(data.ToZero, toZero{
+				PkgPath:   pkg.PkgPath,
+				Name:      name,
+				TotalSize: sizes.Sizeof(t),
+				Offset:    offsets[index],
+				ZeroSize:  sizes.Sizeof(field.Type()),
+			})
+		}
 
-		data.Globals = append(data.Globals, globalSymbol{
-			pkg.PkgPath, name, sizeOf(v.Type()),
-		})
 	}
 
 	bench := filepath.Join(dir, benchFile)
@@ -287,12 +310,14 @@ type tmplData struct {
 	// initdone we can't mess with.
 	Inits []string
 
-	Globals []globalSymbol
+	ToZero []toZero
 }
 
-type globalSymbol struct {
-	Path, Name string
-	Size       int64
+type toZero struct {
+	PkgPath, Name string
+
+	TotalSize        int64
+	Offset, ZeroSize int64
 }
 
 var benchTmpl = template.Must(template.New("").Parse(`
@@ -319,11 +344,13 @@ func BenchmarkInit(b *testing.B) {
 }
 
 // deinit undoes the work that the init functions being benchmarked do. In
-// particular, their globals are zeroed, and "initdone" is set to 0 to get init
-// to do work again.
+// particular, "initdone" is set to 0 to get init to do work again, and any
+// globals known to cause issues are reset.
 func deinit() {
-	{{- range $i, $g := .Globals }}
-	_globalvar{{$i}} = [{{$g.Size}}]byte{}
+	{{- range $i, $g := .ToZero }}
+	for i := {{$g.Offset}}; i < {{$g.Offset}}+{{$g.ZeroSize}}; i++ {
+		_tozero{{$i}}[i] = 0
+	}
 	{{- end }}
 
 	{{- range $i, $_ := .Inits }}
@@ -334,9 +361,9 @@ func deinit() {
 //go:linkname _init {{.PkgPath}}.init
 func _init()
 
-{{ range $i, $g := .Globals }}
-//go:linkname _globalvar{{$i}} {{$g.Path}}.{{$g.Name}}
-var _globalvar{{$i}} [{{$g.Size}}]byte
+{{ range $i, $g := .ToZero }}
+//go:linkname _tozero{{$i}} {{$g.PkgPath}}.{{$g.Name}}
+var _tozero{{$i}} [{{$g.TotalSize}}]byte
 {{- end }}
 
 {{- range $i, $path := .Inits }}

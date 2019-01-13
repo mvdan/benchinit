@@ -38,6 +38,10 @@ var (
 	sign = make(chan os.Signal, 1)
 
 	flagSet flag.FlagSet
+
+	numPool = sync.Pool{
+		New: func() interface{} { return new(int) },
+	}
 )
 
 func init() {
@@ -46,5 +50,10 @@ func init() {
 	signal.Notify(sign, os.Interrupt)
 
 	var b bool
+	// We must zero FlagSet's map of defined flags to avoid "flag redefined"
+	// panics.
 	flagSet.BoolVar(&b, "i", false, "")
+
+	// Must be *int; otherwise the pool global has been broken.
+	_ = numPool.Get().(*int)
 }
