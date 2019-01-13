@@ -164,8 +164,6 @@ const (
 	stubFile  = "benchinit_generated_stub.go"
 )
 
-var sizes = types.SizesFor("gc", runtime.GOARCH)
-
 func setup(pkg *packages.Package) (cleanup func(), _ error) {
 	if len(pkg.GoFiles) == 0 {
 		// No non-test Go files; no init work to benchmark. Do nothing,
@@ -198,56 +196,26 @@ func setup(pkg *packages.Package) (cleanup func(), _ error) {
 	}
 	roots := []*packages.Package{pkg}
 	packages.Visit(roots, func(pkg *packages.Package) bool {
-		switch pkg.PkgPath {
-		case "runtime", // messes up everything
-			"testing",   // messes up the benchmark itself
-			"os/signal", // messes up signal.Notify
-			"time":      // messes up monotonic times
-			// skip their imports as well.
-			return false
+		if dontReinit[pkg.PkgPath] {
+			return false // skip their imports as well.
 		}
 		data.Inits = append(data.Inits, pkg.PkgPath)
-		if !*recursive {
-			// not in recursive mode.
-			return false
-		}
-		return true
-	}, nil)
-
-	scope := pkg.Types.Scope()
-	for _, name := range scope.Names() {
-		v, ok := scope.Lookup(name).(*types.Var)
-		if !ok {
-			continue
-		}
-		switch t := v.Type(); t.String() {
-		case "flag.FlagSet":
-			st := t.Underlying().(*types.Struct)
-			var fields []*types.Var
-			var field *types.Var
-			index := -1
-			for i := 0; i < st.NumFields(); i++ {
-				field = st.Field(i)
-				if field.Name() == "formal" {
-					index = i
-					// continue so that we grab all fields
+		scope := pkg.Types.Scope()
+		for _, name := range scope.Names() {
+			vr, ok := scope.Lookup(name).(*types.Var)
+			if !ok {
+				continue
+			}
+			for _, shouldZero := range globalsToZero {
+				zero := shouldZero(vr)
+				if zero == dontZero {
+					continue
 				}
-				fields = append(fields, field)
+				data.ToZero = append(data.ToZero, zero)
 			}
-			if index == -1 {
-				panic("field not found")
-			}
-			offsets := sizes.Offsetsof(fields)
-			data.ToZero = append(data.ToZero, toZero{
-				PkgPath:   pkg.PkgPath,
-				Name:      name,
-				TotalSize: sizes.Sizeof(t),
-				Offset:    offsets[index],
-				ZeroSize:  sizes.Sizeof(field.Type()),
-			})
 		}
-
-	}
+		return *recursive // only benchmark deps when -r is given
+	}, nil)
 
 	bench := filepath.Join(dir, benchFile)
 	if err := templateFile(bench, benchTmpl, data); err != nil {
@@ -261,6 +229,51 @@ func setup(pkg *packages.Package) (cleanup func(), _ error) {
 	}
 	toDelete = append(toDelete, stub)
 	return cleanup, nil
+}
+
+var dontReinit = map[string]bool{
+	"runtime":   true, // messes up everything
+	"testing":   true, // messes up the benchmark itself
+	"os/signal": true, // messes up signal.Notify
+	"time":      true, // messes up monotonic times
+}
+
+var dontZero = toZero{}
+
+var sizes = types.SizesFor("gc", runtime.GOARCH)
+
+var globalsToZero = [...]func(*types.Var) toZero{
+	// Zero flag.FlagSet struct's "formal" field to avoid "flag redefined"
+	// panics.
+	func(vr *types.Var) toZero {
+		t := vr.Type()
+		if t.String() != "flag.FlagSet" {
+			return dontZero
+		}
+		st := t.Underlying().(*types.Struct)
+		var fields []*types.Var
+		var field *types.Var
+		index := -1
+		for i := 0; i < st.NumFields(); i++ {
+			field = st.Field(i)
+			if field.Name() == "formal" {
+				index = i
+				// continue so that we grab all fields
+			}
+			fields = append(fields, field)
+		}
+		if index == -1 {
+			panic("field not found")
+		}
+		offsets := sizes.Offsetsof(fields)
+		return toZero{
+			PkgPath:   vr.Pkg().Path(),
+			Name:      vr.Name(),
+			TotalSize: sizes.Sizeof(t),
+			Offset:    offsets[index],
+			ZeroSize:  sizes.Sizeof(field.Type()),
+		}
+	},
 }
 
 func benchmark(pkgs []*packages.Package, testflags []string) error {

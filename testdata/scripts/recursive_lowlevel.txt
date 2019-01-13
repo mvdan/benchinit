@@ -29,6 +29,8 @@ import (
 	_ "time"
 	_ "syscall"
 	_ "fmt"
+
+        _ "test.tld/foo/imported"
 )
 
 var (
@@ -56,4 +58,16 @@ func init() {
 
 	// Must be *int; otherwise the pool global has been broken.
 	_ = numPool.Get().(*int)
+}
+-- imported/imported.go --
+package imported
+
+import "flag"
+
+var flagSet flag.FlagSet
+
+func init() {
+	var b bool
+	// Check that we zero these in dependencies too, when in recursive mode.
+	flagSet.BoolVar(&b, "i", false, "")
 }
