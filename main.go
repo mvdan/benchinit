@@ -206,11 +206,15 @@ func setup(pkg *packages.Package) (cleanup func(), _ error) {
 			if !ok {
 				continue
 			}
+			t := vr.Type()
 			for _, shouldZero := range globalsToZero {
-				zero := shouldZero(vr)
+				zero := shouldZero(t)
 				if zero == dontZero {
 					continue
 				}
+				zero.PkgPath = pkg.PkgPath
+				zero.Name = vr.Name()
+				zero.TotalSize = sizes.Sizeof(t)
 				data.ToZero = append(data.ToZero, zero)
 			}
 		}
@@ -242,38 +246,34 @@ var dontZero = toZero{}
 
 var sizes = types.SizesFor("gc", runtime.GOARCH)
 
-var globalsToZero = [...]func(*types.Var) toZero{
+// globalsToZero is a list of functions that look for subsets of bytes within
+// globals that need zeroing between init calls.
+var globalsToZero = [...]func(types.Type) toZero{
 	// Zero flag.FlagSet struct's "formal" field to avoid "flag redefined"
 	// panics.
-	func(vr *types.Var) toZero {
-		t := vr.Type()
+	func(t types.Type) toZero {
 		if t.String() != "flag.FlagSet" {
 			return dontZero
 		}
 		st := t.Underlying().(*types.Struct)
-		var fields []*types.Var
-		var field *types.Var
-		index := -1
-		for i := 0; i < st.NumFields(); i++ {
-			field = st.Field(i)
-			if field.Name() == "formal" {
-				index = i
-				// continue so that we grab all fields
-			}
-			fields = append(fields, field)
-		}
-		if index == -1 {
-			panic("field not found")
-		}
-		offsets := sizes.Offsetsof(fields)
+		field, offset := fieldByName(st, "formal")
 		return toZero{
-			PkgPath:   vr.Pkg().Path(),
-			Name:      vr.Name(),
-			TotalSize: sizes.Sizeof(t),
-			Offset:    offsets[index],
-			ZeroSize:  sizes.Sizeof(field.Type()),
+			Offset:   offset,
+			ZeroSize: sizes.Sizeof(field.Type()),
 		}
 	},
+}
+
+func fieldByName(st *types.Struct, name string) (vr *types.Var, offset int64) {
+	var fields []*types.Var
+	for i := 0; i < st.NumFields(); i++ {
+		field := st.Field(i)
+		fields = append(fields, field)
+		if field.Name() == name {
+			return field, sizes.Offsetsof(fields)[i]
+		}
+	}
+	return nil, 0
 }
 
 func benchmark(pkgs []*packages.Package, testflags []string) error {
