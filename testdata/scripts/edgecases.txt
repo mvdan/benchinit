@@ -1,37 +1,34 @@
 env HOME=$WORK/home
 
-! benchinit -benchtime=10x ./withtempfile
-stderr '_test\.go.* already exists'
-
+# read-only dirs
 exec chmod a-w readonlydir
 ! benchinit -benchtime=10x ./readonlydir
 stderr 'permission denied'
 
+# missing package
 ! benchinit -benchtime=10x ./missingpkg
 stderr 'cannot find package'
 
-! benchinit -benchtime=10x ./missingpkg
-stderr 'cannot find package'
+# nothing to benchmark, plus overwrite generated files
+benchinit -benchtime=10x ./testfileswithtempfile
+! stdout '^BenchmarkInit'
+stdout 'ok\s*test.tld/foo/testfileswithtempfile'
+! stderr 'already exists'
 
-benchinit -benchtime=10x ./onlytestfiles
-! stdout '^BenchmarkInit' # nothing to benchmark
-stdout 'ok\s*test.tld/foo/onlytestfiles'
-
+# BenchmarkInit already exists elsewhere in the package
 ! benchinit -benchtime=10x ./withbenchmarkinit
 stderr 'BenchmarkInit redeclared'
 
 -- go.mod --
 module test.tld/foo
--- withtempfile/empty.go --
-package foo
--- withtempfile/benchinit_generated_test.go --
-package foo
-
-var s = "very important work we cannot delete"
 -- readonlydir/empty.go --
 package foo
--- onlytestfiles/empty_test.go --
+-- testfileswithtempfile/empty_test.go --
 package foo
+-- testfileswithtempfile/benchinit_generated_test.go --
+package foo
+
+var s = "extremely unlikely that the developer has work in here"
 -- withbenchmarkinit/empty.go --
 package foo
 -- withbenchmarkinit/bench_test.go --

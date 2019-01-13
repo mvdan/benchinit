@@ -266,9 +266,6 @@ func benchmarkablePkgs(roots ...*packages.Package) []string {
 // execution of the template with some data. It errors if the file exists or
 // cannot be created.
 func templateFile(path string, tmpl *template.Template, data interface{}) error {
-	if _, err := os.Lstat(path); !os.IsNotExist(err) {
-		return fmt.Errorf("temporary file %q already exists", path)
-	}
 	f, err := os.Create(path)
 	if err != nil {
 		return err
