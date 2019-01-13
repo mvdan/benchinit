@@ -195,11 +195,24 @@ func setup(pkg *packages.Package) (cleanup func(), _ error) {
 
 	data := tmplData{
 		Package: pkg,
-		Inits:   []string{pkg.PkgPath},
 	}
-	if *recursive {
-		data.Inits = benchmarkablePkgs(pkg)
-	}
+	roots := []*packages.Package{pkg}
+	packages.Visit(roots, func(pkg *packages.Package) bool {
+		switch pkg.PkgPath {
+		case "runtime", // messes up everything
+			"testing",   // messes up the benchmark itself
+			"os/signal", // messes up signal.Notify
+			"time":      // messes up monotonic times
+			// skip their imports as well.
+			return false
+		}
+		data.Inits = append(data.Inits, pkg.PkgPath)
+		if !*recursive {
+			// not in recursive mode.
+			return false
+		}
+		return true
+	}, nil)
 
 	scope := pkg.Types.Scope()
 	for _, name := range scope.Names() {
@@ -266,23 +279,6 @@ func benchmark(pkgs []*packages.Package, testflags []string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
-}
-
-func benchmarkablePkgs(roots ...*packages.Package) []string {
-	var list []string
-	packages.Visit(roots, func(pkg *packages.Package) bool {
-		switch pkg.PkgPath {
-		case "runtime", // messes up everything
-			"testing",   // messes up the benchmark itself
-			"os/signal", // messes up signal.Notify
-			"time":      // messes up monotonic times
-			// skip their imports as well.
-			return false
-		}
-		list = append(list, pkg.PkgPath)
-		return true
-	}, nil)
-	return list
 }
 
 // templateFile creates a file at path and fills its contents with the
