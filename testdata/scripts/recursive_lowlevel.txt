@@ -77,14 +77,18 @@ type withFlagset struct {
 }
 
 type withFlagset2 struct {
-	Flag flag.FlagSet
+	dontZero1 bool
+	Flag      flag.FlagSet
+	dontZero2 bool
 }
 
 var flagSet2 = new(withFlagset)
 
-var flagSet3 = &flag.FlagSet{}
+var flagSet3 = &withFlagset{}
 
-var flagSet4 *flag.FlagSet
+var flagSet4 *withFlagset
+
+var first = true // first init run? we assume it's not zeroed.
 
 func init() {
 	var b bool
@@ -94,5 +98,16 @@ func init() {
 	// Check that we zero the flagset's field when it's nested or behind a
 	// pointer, too.
 	flagSet2.Flag.BoolVar(&b, "i2", false, "")
-	flagSet3.BoolVar(&b, "i3", false, "")
+	flagSet3.Flag.BoolVar(&b, "i3", false, "")
+
+        // Check that we only zero the appropriate bytes, and not any others
+        // around the ones we want.
+	if first {
+		flagSet3.dontZero1 = true
+		flagSet3.dontZero2 = true
+	} else if !flagSet3.dontZero1 || !flagSet3.dontZero2 {
+		panic("zeroed harmless boolean fields")
+        }
+
+	first = false
 }
