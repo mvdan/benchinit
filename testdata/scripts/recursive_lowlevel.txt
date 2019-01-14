@@ -13,12 +13,12 @@ import (
 	// these can cause issues.
 	_ "runtime"
 	_ "testing"
+	"os"
 	"os/signal"
 	"flag"
 
 	// these surprisingly don't. perhaps we need more code below.
 	_ "unsafe"
-	"os"
 	"sync"
 	_ "sync/atomic"
 	_ "errors"
@@ -64,6 +64,14 @@ func init() {
 
 	// Must be *int; otherwise the pool global has been broken.
 	_ = numPool.Get().(*int)
+
+	if _, err := os.Stderr.Write([]byte("stderr test\n")); err != nil {
+		// Stderr was closed, likely because we reinitialised the "os"
+		// package and Stderr's finaliser closed the file. Use a
+		// somewhat unique exit code, as we can't actually print error
+		// mesages.
+		os.Exit(99)
+	}
 }
 -- imported/imported.go --
 package imported
@@ -100,14 +108,14 @@ func init() {
 	flagSet2.Flag.BoolVar(&b, "i2", false, "")
 	flagSet3.Flag.BoolVar(&b, "i3", false, "")
 
-        // Check that we only zero the appropriate bytes, and not any others
-        // around the ones we want.
+	// Check that we only zero the appropriate bytes, and not any others
+	// around the ones we want.
 	if first {
 		flagSet3.dontZero1 = true
 		flagSet3.dontZero2 = true
 	} else if !flagSet3.dontZero1 || !flagSet3.dontZero2 {
 		panic("zeroed harmless boolean fields")
-        }
+	}
 
 	first = false
 }

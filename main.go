@@ -259,6 +259,7 @@ func setup(pkg *packages.Package) (cleanup func(), _ error) {
 var dontReinit = map[string]bool{
 	"runtime":   true, // messes up everything
 	"testing":   true, // messes up the benchmark itself
+	"os":        true, // messes up os.Stdout/Stderr via closing finalizers
 	"os/signal": true, // messes up signal.Notify
 	"time":      true, // messes up monotonic times
 }
