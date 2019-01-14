@@ -44,7 +44,13 @@ var (
 	numPool = sync.Pool{
 		New: func() interface{} { return new(int) },
 	}
+
+	rtype recursiveType
 )
+
+type recursiveType struct {
+	ptr *recursiveType
+}
 
 func init() {
 	fooOnce.Do(func() { foo = true })
@@ -74,13 +80,19 @@ type withFlagset2 struct {
 	Flag flag.FlagSet
 }
 
-var flagSet2 withFlagset
+var flagSet2 = new(withFlagset)
+
+var flagSet3 = &flag.FlagSet{}
+
+var flagSet4 *flag.FlagSet
 
 func init() {
 	var b bool
 	// Check that we zero these in dependencies too, when in recursive mode.
 	flagSet.BoolVar(&b, "i", false, "")
 
-	// Check that we zero the flagset's field when nested, too.
+	// Check that we zero the flagset's field when it's nested or behind a
+	// pointer, too.
 	flagSet2.Flag.BoolVar(&b, "i2", false, "")
+	flagSet3.BoolVar(&b, "i3", false, "")
 }

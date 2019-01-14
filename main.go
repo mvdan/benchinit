@@ -77,6 +77,7 @@ func main1() int {
 	if err := cmd.Run(); err != nil {
 		// TODO: use ExitError.ExitCode() once we only support 1.12 and
 		// later.
+		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return 1
 	}
 	return 0
@@ -229,14 +230,13 @@ func setup(pkg *packages.Package) (cleanup func(), _ error) {
 			}
 			t := vr.Type()
 			for _, shouldZero := range globalsToZero {
-				zero := shouldZero(t)
-				if zero == dontZero {
-					continue
+				zeros := shouldZero(t)
+				for _, zero := range zeros {
+					zero.PkgPath = pkg.PkgPath
+					zero.Name = vr.Name()
+					zero.InitialSize = sizes.Sizeof(t)
+					data.ToZero = append(data.ToZero, zero)
 				}
-				zero.PkgPath = pkg.PkgPath
-				zero.Name = vr.Name()
-				zero.TotalSize = sizes.Sizeof(t)
-				data.ToZero = append(data.ToZero, zero)
 			}
 		}
 		return *recursive // only benchmark deps when -r is given
@@ -263,35 +263,44 @@ var dontReinit = map[string]bool{
 	"time":      true, // messes up monotonic times
 }
 
-var dontZero = toZero{}
-
 var sizes = types.SizesFor("gc", runtime.GOARCH)
 
 // globalsToZero is a list of functions that look for subsets of bytes within
 // globals that need zeroing between init calls.
-// TODO: support many fields to zero, i.e. []toZero
-var globalsToZero = [...]func(types.Type) toZero{
+var globalsToZero = [...]func(types.Type) []toZero{
 	// Zero flag.FlagSet struct's "formal" field to avoid "flag redefined"
 	// panics.
-	func(t types.Type) toZero {
-		t2, offs1 := lookupByType(t, "flag.FlagSet", 0)
+	// TODO: support many fields to zero.
+	func(t types.Type) []toZero {
+		t2, steps := lookupByType(t, "flag.FlagSet", 0)
 		if t2 == nil {
-			return dontZero
+			return nil
 		}
 		st := t2.Underlying().(*types.Struct)
 		field, offs2 := fieldByName(st, "formal")
-		return toZero{
-			Offset:   offs1 + offs2,
-			ZeroSize: sizes.Sizeof(field.Type()),
-		}
+		steps = append(steps, zeroStep{Offset: offs2})
+		steps = append(steps, zeroStep{ZeroSize: sizes.Sizeof(field.Type())})
+		return []toZero{{
+			Steps: steps,
+		}}
 	},
 }
 
-func lookupByType(t types.Type, tname string, baseOffs int64) (_ types.Type, offset int64) {
+func lookupByType(t types.Type, tname string, level int) (types.Type, []zeroStep) {
 	if t.String() == tname {
-		return t, baseOffs
+		return t, nil
 	}
+	if level++; level > 50 {
+		return nil, nil // avoid loops in a simple way
+	}
+	var step zeroStep
 	switch t := t.Underlying().(type) {
+	case *types.Pointer:
+		t2 := t.Elem()
+		if t3, steps := lookupByType(t2, tname, level); t3 != nil {
+			step.IndirectSize = sizes.Sizeof(t2)
+			return t3, append([]zeroStep{step}, steps...)
+		}
 	case *types.Struct:
 		var fields []*types.Var
 		for i := 0; i < t.NumFields(); i++ {
@@ -300,16 +309,16 @@ func lookupByType(t types.Type, tname string, baseOffs int64) (_ types.Type, off
 			t2 := field.Type()
 
 			// TODO: quadratic work. perhaps replace with Alignof+Offsetof.
-			offset := baseOffs + sizes.Offsetsof(fields)[i]
-			if t2.String() == tname {
-				return field.Type(), offset
-			}
-			if t3, offset := lookupByType(t2, tname, offset); t3 != nil {
-				return t3, offset
+			step.Offset = sizes.Offsetsof(fields)[i]
+			if t3, steps := lookupByType(t2, tname, level); t3 != nil {
+				if step.Offset == 0 {
+					return t3, steps
+				}
+				return t3, append([]zeroStep{step}, steps...)
 			}
 		}
 	}
-	return nil, 0
+	return nil, nil
 }
 
 // fieldByName finds a struct's field by name, returning the field and its
@@ -357,8 +366,19 @@ type tmplData struct {
 type toZero struct {
 	PkgPath, Name string
 
-	TotalSize        int64
-	Offset, ZeroSize int64
+	InitialSize int64
+
+	Steps []zeroStep
+}
+
+type zeroStep struct {
+	// acts as a "oneof", so exactly one of the sections below must be set.
+
+	ZeroSize int64 // zero a number of bytes
+
+	IndirectSize int64 // pointer to a chunk of memory of a size
+
+	Offset int64 // byte offset, after a possible indirect
 }
 
 // Don't use StartTimer and StopTimer, as they call ReadMemStats, which is way
@@ -372,8 +392,10 @@ var benchTmpl = template.Must(template.New("").Parse(`
 package {{.Name}}_test
 
 import (
+	"encoding/binary"
+	"reflect"
 	"testing"
-	_ "unsafe" // must import unsafe to use go:linkname
+	"unsafe" // must import unsafe to use go:linkname
 )
 
 func BenchmarkInit(b *testing.B) {
@@ -386,14 +408,44 @@ func BenchmarkInit(b *testing.B) {
 	}
 }
 
+// avoid unused import errors
+var _ binary.ByteOrder
+var _ unsafe.Pointer
+var _ reflect.SliceHeader
+
 // deinit undoes the work that the init functions being benchmarked do. In
 // particular, "initdone" is set to 0 to get init to do work again, and any
 // globals known to cause issues are reset.
 func deinit() {
 	{{- range $i, $g := .ToZero }}
-	for i := {{$g.Offset}}; i < {{$g.Offset}}+{{$g.ZeroSize}}; i++ {
-		_tozero{{$i}}[i] = 0
+		{{- $last := (print "_zero" $i "_base") -}}
+		{{- range $j, $s := .Steps }}
+			{{- $cur := (print "_zero" $i "_" $j) -}}
+			{{- if ne $s.ZeroSize 0 }}
+	for i := 0; i < {{$s.ZeroSize}}; i++ {
+		{{$last}}[i] = 0
 	}
+
+			{{- else if ne $s.IndirectSize 0 }}
+	var {{$cur}} []byte
+	if ptr := uintptr(binary.LittleEndian.Uint64({{$last}}[:])); ptr != 0 {
+		// use a slice, to not copy the underlying bytes
+		hdr := (*reflect.SliceHeader)(unsafe.Pointer(&{{$cur}}))
+		hdr.Data = uintptr(binary.LittleEndian.Uint64({{$last}}[:]))
+		hdr.Len = {{$s.IndirectSize}}
+		hdr.Cap = {{$s.IndirectSize}}
+	} else {
+		dummy := [{{$s.IndirectSize}}]byte{}
+		{{$cur}} = dummy[:]
+	}
+
+			{{- else }}{{/* $s.Offset */}}
+	{{$cur}} := {{$last}}[{{$s.Offset}}:]
+
+			{{- end -}}
+			{{- $last = $cur -}}
+		{{- end -}}
+		{{- printf "\n" -}}
 	{{- end }}
 
 	{{- range $i, $_ := .Inits }}
@@ -405,8 +457,8 @@ func deinit() {
 func _init()
 
 {{ range $i, $g := .ToZero }}
-//go:linkname _tozero{{$i}} {{$g.PkgPath}}.{{$g.Name}}
-var _tozero{{$i}} [{{$g.TotalSize}}]byte
+//go:linkname _zero{{$i}}_base {{$g.PkgPath}}.{{$g.Name}}
+var _zero{{$i}}_base [{{$g.InitialSize}}]byte
 {{- end }}
 
 {{- range $i, $path := .Inits }}
