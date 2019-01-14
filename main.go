@@ -123,6 +123,9 @@ var testFlagDefn = []struct {
 	{Name: "timeout"},
 	{Name: "trace"},
 	{Name: "v", BoolVar: true},
+
+	// extra build flags?
+	{Name: "race", BoolVar: true},
 }
 
 var flagSet = flag.NewFlagSet("benchinit", flag.ContinueOnError)
@@ -228,13 +231,12 @@ func setup(pkg *packages.Package) (cleanup func(), _ error) {
 			if !ok {
 				continue
 			}
-			t := vr.Type()
 			for _, shouldZero := range globalsToZero {
-				zeros := shouldZero(t)
+				zeros := shouldZero(vr)
 				for _, zero := range zeros {
 					zero.PkgPath = pkg.PkgPath
 					zero.Name = vr.Name()
-					zero.InitialSize = sizes.Sizeof(t)
+					zero.InitialSize = sizes.Sizeof(vr.Type())
 					data.ToZero = append(data.ToZero, zero)
 				}
 			}
@@ -268,12 +270,20 @@ var sizes = types.SizesFor("gc", runtime.GOARCH)
 
 // globalsToZero is a list of functions that look for subsets of bytes within
 // globals that need zeroing between init calls.
-var globalsToZero = [...]func(types.Type) []toZero{
+var globalsToZero = [...]func(*types.Var) []toZero{
 	// Zero flag.FlagSet struct's "formal" field to avoid "flag redefined"
 	// panics.
 	// TODO: support many fields to zero.
-	func(t types.Type) []toZero {
-		t2, steps := lookupByType(t, "flag.FlagSet", 0)
+	func(vr *types.Var) []toZero {
+		if vr.Pkg().Path() == "flag" {
+			// Don't mess with flag.CommandLine, since it breaks
+			// some large init funcs, and is not necessary as it's
+			// set up with a constructor. See the runtime.GC call in
+			// the testscripts.
+			// TODO: figure out why this is necessary.
+			return nil
+		}
+		t2, steps := lookupByType(vr.Type(), "flag.FlagSet", 0)
 		if t2 == nil {
 			return nil
 		}
