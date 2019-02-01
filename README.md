@@ -24,4 +24,4 @@ Finally, like any other benchmark, you can pass in `go test` flags:
 ### Further reading
 
 This tool was result of a discussion with [@josharian](https://github.com/josharian).
-You can read more about Josh's idea in his [blog post](http://commaok.xyz/post/benchmark-init/).
+You can read more about Josh's idea in his [blog post](https://commaok.xyz/post/benchmark-init/).
