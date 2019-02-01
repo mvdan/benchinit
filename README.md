@@ -4,6 +4,9 @@ Benchmark the initialization cost of your packages or programs.
 
 	go get -u mvdan.cc/benchinit
 
+This includes the cost of `init` functions, plus initialising globals. In other
+words, a package's contribution to the slowness before `main` is run.
+
 ### Quickstart
 
 Benchmarking a single package is simple:
@@ -20,5 +23,5 @@ Finally, like any other benchmark, you can pass in `go test` flags:
 
 ### Further reading
 
-This tool was result of a discussion with @josharian. You can read more about
-Josh's idea in his blog post: http://commaok.xyz/post/benchmark-init/
+This tool was result of a discussion with [@josharian](https://github.com/josharian).
+You can read more about Josh's idea in his [blog post](http://commaok.xyz/post/benchmark-init/).
