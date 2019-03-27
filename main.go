@@ -482,21 +482,15 @@ var _zero{{$i}}_base [{{$g.InitialSize}}]byte
 //go:linkname _init {{.PkgPath}}.init
 func _init()
 
-{{- else -}}
-
-//go:linkname _doInit runtime.doInit
-func _doInit(t unsafe.Pointer) // t is an *initTask
-
-{{ end }}
-
-{{ if eq .InitCode "initdone" }}
-
 {{- range $i, $path := .Inits }}
 //go:linkname _initdone{{$i}} {{$path}}.initdone·
 var _initdone{{$i}} uint8
 {{- end }}
 
 {{- else -}}
+
+//go:linkname _doInit runtime.doInit
+func _doInit(t unsafe.Pointer) // t is an *initTask
 
 // We don't need the initTask type. We just need to get its address for doInit,
 // and modify its first field, an uintptr.
