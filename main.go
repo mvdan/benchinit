@@ -217,7 +217,8 @@ func setup(pkg *packages.Package) (cleanup func(), _ error) {
 	dir := filepath.Dir(pkg.GoFiles[0])
 
 	data := tmplData{
-		Package: pkg,
+		InitCode: initCode,
+		Package:  pkg,
 	}
 	roots := []*packages.Package{pkg}
 	packages.Visit(roots, func(pkg *packages.Package) bool {
@@ -362,6 +363,9 @@ func templateFile(path string, tmpl *template.Template, data interface{}) error 
 }
 
 type tmplData struct {
+	// InitCode is the init strategy used by the current Go version.
+	InitCode string
+
 	// Package is the non-test package being benchmarked.
 	*packages.Package
 	// Inits are the package paths of all the init functions to be
@@ -415,7 +419,11 @@ func BenchmarkInit(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		deinit() // get ready to run init again
+		{{ if eq .InitCode "initdone" }}
 		_init()
+		{{ else }}
+		_doInit(unsafe.Pointer(&_initdone0))
+		{{ end }}
 	}
 }
 
@@ -464,18 +472,41 @@ func deinit() {
 	{{- end }}
 }
 
-//go:linkname _init {{.PkgPath}}.init
-func _init()
-
 {{ range $i, $g := .ToZero }}
 //go:linkname _zero{{$i}}_base {{$g.PkgPath}}.{{$g.Name}}
 var _zero{{$i}}_base [{{$g.InitialSize}}]byte
 {{- end }}
 
+{{ if eq .InitCode "initdone" }}
+
+//go:linkname _init {{.PkgPath}}.init
+func _init()
+
+{{- else -}}
+
+//go:linkname _doInit runtime.doInit
+func _doInit(t unsafe.Pointer) // t is an *initTask
+
+{{ end }}
+
+{{ if eq .InitCode "initdone" }}
+
 {{- range $i, $path := .Inits }}
 //go:linkname _initdone{{$i}} {{$path}}.initdone·
 var _initdone{{$i}} uint8
 {{- end }}
+
+{{- else -}}
+
+// We don't need the initTask type. We just need to get its address for doInit,
+// and modify its first field, an uintptr.
+
+{{- range $i, $path := .Inits }}
+//go:linkname _initdone{{$i}} {{$path}}..inittask
+var _initdone{{$i}} uintptr
+{{- end }}
+
+{{ end }}
 `[1:]))
 
 var stubTmpl = template.Must(template.New("").Parse(`
