@@ -62,7 +62,8 @@ func main1() int {
 	}
 
 	// Benchmark the packages with 'go test -bench'.
-	args := []string{"test",
+	args := []string{
+		"test",
 		"-run=^$",                // disable all tests
 		"-vet=off",               // disable vet
 		"-bench=^BenchmarkInit$", // only run the one benchmark
