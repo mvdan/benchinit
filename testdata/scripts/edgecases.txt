@@ -7,7 +7,7 @@ stderr 'permission denied'
 
 # missing package
 ! benchinit -benchtime=10x ./missingpkg
-stderr 'cannot find package'
+stderr 'cannot find (package|module)'
 
 # nothing to benchmark, plus overwrite generated files
 benchinit -benchtime=10x ./testfileswithtempfile

@@ -17,9 +17,7 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-var (
-	recursive = flagSet.Bool("r", false, "include inits of transitive dependencies")
-)
+var recursive = flagSet.Bool("r", false, "include inits of transitive dependencies")
 
 func init() {
 	flagSet.Usage = usage
