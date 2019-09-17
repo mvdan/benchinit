@@ -2,7 +2,7 @@
 
 Benchmark the initialization cost of your packages or programs.
 
-	cd $(mktemp -d); go mod init tmp; go get mvdan.cc/benchinit
+	go get mvdan.cc/benchinit
 
 This includes the cost of `init` functions, plus initialising globals. In other
 words, a package's contribution to the slowness before `main` is run.
