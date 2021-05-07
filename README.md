@@ -1,5 +1,8 @@
 # benchinit
 
+_Deprecated_: use `GODEBUG=inittrace=1` on Go 1.16 or later:
+https://golang.org/doc/go1.16#runtime
+
 Benchmark the initialization cost of your packages or programs.
 
 	cd $(mktemp -d); go mod init tmp; go get mvdan.cc/benchinit
