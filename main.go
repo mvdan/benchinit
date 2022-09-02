@@ -4,32 +4,26 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
-	"go/types"
+	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
+	"regexp"
 	"strings"
 	"text/template"
 
 	"golang.org/x/tools/go/packages"
 )
 
-var recursive = flagSet.Bool("r", false, "include inits of transitive dependencies")
-
-func init() {
-	flagSet.Usage = usage
-}
-
-func main() {
-	os.Exit(main1())
-}
+func main() { os.Exit(main1()) }
 
 func main1() int {
 	// Figure out which flags should be passed on to 'go test'.
 	testflags, rest := lazyFlagParse(os.Args[1:])
+	flagSet.Usage = usage
 	if err := flagSet.Parse(rest); err != nil {
 		if err != flag.ErrHelp {
 			fmt.Fprintf(os.Stderr, "flag: %v\n", err)
@@ -50,13 +44,20 @@ func main1() int {
 	}
 
 	// Prepare the packages to be benchmarked.
-	for _, pkg := range pkgs {
-		cleanup, err := setup(pkg)
-		defer cleanup()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "benchmark: %v\n", err)
-			return 1
-		}
+	tmpFile, err := os.CreateTemp("", "benchinit_*_test.go")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "setup: %v\n", err)
+		return 1
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+	// mainTmpl.Execute(os.Stderr, pkgs) // for debugging
+	if err := mainTmpl.Execute(tmpFile, pkgs); err != nil {
+		fmt.Fprintf(os.Stderr, "setup: %v\n", err)
+		return 1
+	}
+	if err := tmpFile.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "setup: %v\n", err)
 	}
 
 	// Benchmark the packages with 'go test -bench'.
@@ -67,20 +68,163 @@ func main1() int {
 		"-bench=^BenchmarkInit$", // only run the one benchmark
 	}
 	args = append(args, testflags...) // add the user's test args
-	for _, pkg := range pkgs {
-		args = append(args, pkg.PkgPath)
-	}
+	args = append(args, tmpFile.Name())
 	cmd := exec.Command("go", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		// TODO: use ExitError.ExitCode() once we only support 1.12 and
-		// later.
-		fmt.Fprintf(os.Stderr, "%v\n", err)
+	pr, pw, err := os.Pipe()
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "start: %v\n", err)
+		return 1
+	}
+	var waitErr error
+	go func() {
+		waitErr = cmd.Wait()
+		pw.Close()
+	}()
+
+	// Get our benchinit result lines.
+	// Note that "go test" will often run a benchmark function multiple times
+	// with increasing b.N values, to estimate an N for e.g. -benchtime=1s.
+	// We only want the last benchinit result, the one directly followed by the
+	// original continuation to the BenchmarkInit line. For example:
+	//
+	//	BenchmarkInit-16
+	//	benchinit: BenchmarkGoBuild	1	7000 ns/op	5344 B/op	47 allocs/op
+	//	continuation:
+	//	benchinit: BenchmarkGoBuild	100	5880 ns/op	5080 B/op	45 allocs/op
+	//	continuation:
+	//	benchinit: BenchmarkGoBuild	1224	5803 ns/op	5059 B/op	45 allocs/op
+	//	continuation: 1224	   961433 ns/op
+	var errorBuffer bytes.Buffer // to print the whole output if we fail
+	var benchinitResult string
+	rxBenchinitResult := regexp.MustCompile(`^benchinit: (.*)`)
+	rxFinalResult := regexp.MustCompile(`^continuation:\s+\d+\s`)
+	scanner := bufio.NewScanner(io.TeeReader(pr, &errorBuffer))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if match := rxBenchinitResult.FindStringSubmatch(line); match != nil {
+			benchinitResult = match[1]
+		} else if rxFinalResult.MatchString(line) {
+			if benchinitResult == "" {
+				panic("did not find benchinit's result?")
+			}
+			fmt.Println(benchinitResult)
+			benchinitResult = ""
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "scanner: %v\n", err)
+		return 1
+	}
+	if waitErr != nil {
+		// TODO: use ExitError.ExitCode() once we only support 1.12 and later.
+		fmt.Fprintf(os.Stderr, "wait: %v; output:\n%s\n", waitErr, errorBuffer.Bytes())
 		return 1
 	}
 	return 0
 }
+
+// TODO: the import mechanism means we don't support main packages right now.
+// Importing the main package is only possible by placing the test file in it,
+// meaning that we should only support one main package per invocation at most.
+
+var mainTmpl = template.Must(template.New("").Parse(`
+package main
+
+import (
+	"os"
+	"strconv"
+	"os/exec"
+	"testing"
+	"time"
+	"fmt"
+	"strings"
+	"regexp"
+
+	{{ range $_, $pkg := . -}}
+	_ {{ printf "%q" $pkg.PkgPath }}
+	{{- end }}
+)
+
+func BenchmarkInit(b *testing.B) {
+	execPath, err := os.Executable()
+	if err != nil {
+		b.Fatal(err)
+	}
+	pkgs := []string{
+		{{ range $_, $pkg := . -}}
+			{{ printf "%q" $pkg.PkgPath }},
+		{{- end }}
+	}
+	type totals struct {
+		Clock  time.Duration
+		Bytes  uint64
+		Allocs uint64
+	}
+	pkgTotals := make(map[string]*totals, len(pkgs))
+	for _, pkg := range pkgs {
+		pkgTotals[pkg] = new(totals)
+	}
+
+	rxInitTrace := regexp.MustCompile(` + "`" + `(?m)^init (?P<pkg>[^ ]+) (?P<time>@[^ ]+ [^ ]+), (?P<clock>[^ ]+ [^ ]+) clock, (?P<bytes>[^ ]+) bytes, (?P<allocs>[^ ]+) allocs$` + "`" + `)
+	rxIndexPkg := rxInitTrace.SubexpIndex("pkg")
+	rxIndexClock := rxInitTrace.SubexpIndex("clock")
+	rxIndexBytes := rxInitTrace.SubexpIndex("bytes")
+	rxIndexAllocs := rxInitTrace.SubexpIndex("allocs")
+
+	for i := 0; i < b.N; i++ {
+		cmd := exec.Command(execPath, "-h")
+		// TODO: do not override existing GODEBUG values
+		cmd.Env = append(os.Environ(), "GODEBUG=inittrace=1")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			b.Fatal(err)
+		}
+		for _, match := range rxInitTrace.FindAllSubmatch(out, -1) {
+			pkg := string(match[rxIndexPkg])
+			totals := pkgTotals[pkg]
+			if totals == nil {
+				continue // we are not interested in this package
+			}
+			clock, err := time.ParseDuration(strings.Replace(string(match[rxIndexClock]), " ", "", 1))
+			if err != nil {
+				b.Fatal(err)
+			}
+			bytes, err := strconv.ParseUint(string(match[rxIndexBytes]), 10, 64)
+			if err != nil {
+				b.Fatal(err)
+			}
+			allocs, err := strconv.ParseUint(string(match[rxIndexAllocs]), 10, 64)
+			if err != nil {
+				b.Fatal(err)
+			}
+			totals.Clock += clock
+			totals.Bytes += bytes
+			totals.Allocs += allocs
+		}
+	}
+	for _, pkg := range pkgs {
+		totals := *pkgTotals[pkg]
+
+		// Turn "golang.org/x/foo" into "GolangOrgXFoo".
+		name := pkg
+		name = strings.ReplaceAll(name, "/", " ")
+		name = strings.ReplaceAll(name, ".", " ")
+		name = strings.Title(name)
+		name = strings.ReplaceAll(name, " ", "")
+
+		// We are printing between "BenchmarkInit" and its results,
+		// which would usually go on the same line.
+		// Break the line with a leading newline, show our separate results,
+		// and then let the continuation of the original line go below.
+		// TODO: include the -N CPU suffix, like in BenchmarkInit-16.
+		fmt.Printf("\nbenchinit: Benchmark%s\t%d\t%d ns/op\t%d B/op\t%d allocs/op\ncontinuation:",
+			name, b.N, totals.Clock.Nanoseconds()/int64(b.N), totals.Bytes/uint64(b.N), totals.Allocs/uint64(b.N))
+	}
+	// TODO: complain if any of our packages are not seen N times
+}
+`))
 
 // testFlag is copied from cmd/go/internal/test/testflag.go's testFlagDefn, with
 // small modifications.
@@ -179,333 +323,3 @@ _args:
 	}
 	return testflags, rest
 }
-
-const (
-	benchFile = "benchinit_generated_test.go"
-	stubFile  = "benchinit_generated_stub.go"
-)
-
-// setup prepares a package to be benchmarked. In particular, a number of
-// temporary generated files are added to its directory on disk, to add the
-// necessary BenchmarkInit function and all other necessary pieces.
-func setup(pkg *packages.Package) (cleanup func(), _ error) {
-	if len(pkg.GoFiles) == 0 {
-		// No non-test Go files; no init work to benchmark. Do nothing,
-		// and the 'go test -bench' command later will do little work
-		// here.
-		return func() {}, nil
-	}
-
-	var toDelete []string
-
-	cleanup = func() {
-		for _, path := range toDelete {
-			if err := os.Remove(path); err != nil {
-				// TODO: return the error instead? how likely is
-				// it to happen?
-				panic(err)
-			}
-		}
-	}
-
-	// Place the benchmark file in the same package, to ensure that we can
-	// also benchmark transitive internal dependencies.
-	// We assume 'go list' packages; all package files in the same directory.
-	// TODO: since we use go/packages, add support for other build systems
-	// and test it.
-	dir := filepath.Dir(pkg.GoFiles[0])
-
-	data := tmplData{
-		InitCode: initCode,
-		Package:  pkg,
-	}
-	roots := []*packages.Package{pkg}
-	packages.Visit(roots, func(pkg *packages.Package) bool {
-		if dontReinit[pkg.PkgPath] {
-			return false // skip their imports as well.
-		}
-		data.Inits = append(data.Inits, pkg.PkgPath)
-		scope := pkg.Types.Scope()
-		for _, name := range scope.Names() {
-			vr, ok := scope.Lookup(name).(*types.Var)
-			if !ok {
-				continue
-			}
-			for _, shouldZero := range globalsToZero {
-				zeros := shouldZero(vr)
-				for _, zero := range zeros {
-					zero.PkgPath = pkg.PkgPath
-					zero.Name = vr.Name()
-					zero.InitialSize = sizes.Sizeof(vr.Type())
-					data.ToZero = append(data.ToZero, zero)
-				}
-			}
-		}
-		return *recursive // only benchmark deps when -r is given
-	}, nil)
-
-	bench := filepath.Join(dir, benchFile)
-	if err := templateFile(bench, benchTmpl, data); err != nil {
-		return cleanup, err
-	}
-	toDelete = append(toDelete, bench)
-
-	stub := filepath.Join(dir, stubFile)
-	if err := templateFile(stub, stubTmpl, data); err != nil {
-		return cleanup, err
-	}
-	toDelete = append(toDelete, stub)
-	return cleanup, nil
-}
-
-var dontReinit = map[string]bool{
-	"runtime":   true, // messes up everything
-	"testing":   true, // messes up the benchmark itself
-	"os":        true, // messes up os.Stdout/Stderr via closing finalizers
-	"os/signal": true, // messes up signal.Notify
-	"time":      true, // messes up monotonic times
-}
-
-var sizes = types.SizesFor("gc", runtime.GOARCH)
-
-// globalsToZero is a list of functions that look for subsets of bytes within
-// globals that need zeroing between init calls.
-var globalsToZero = [...]func(*types.Var) []toZero{
-	// Zero flag.FlagSet struct's "formal" field to avoid "flag redefined"
-	// panics.
-	// TODO: support many fields to zero.
-	func(vr *types.Var) []toZero {
-		if vr.Pkg().Path() == "flag" {
-			// Don't mess with flag.CommandLine, since it breaks
-			// some large init funcs, and is not necessary as it's
-			// set up with a constructor. See the runtime.GC call in
-			// the testscripts.
-			// TODO: figure out why this is necessary.
-			return nil
-		}
-		t2, steps := lookupByType(vr.Type(), "flag.FlagSet", 0)
-		if t2 == nil {
-			return nil
-		}
-		st := t2.Underlying().(*types.Struct)
-		field, offs2 := fieldByName(st, "formal")
-		steps = append(steps, zeroStep{Offset: offs2})
-		steps = append(steps, zeroStep{ZeroSize: sizes.Sizeof(field.Type())})
-		return []toZero{{
-			Steps: steps,
-		}}
-	},
-}
-
-func lookupByType(t types.Type, tname string, level int) (types.Type, []zeroStep) {
-	if t.String() == tname {
-		return t, nil
-	}
-	if level++; level > 50 {
-		return nil, nil // avoid loops in a simple way
-	}
-	var step zeroStep
-	switch t := t.Underlying().(type) {
-	case *types.Pointer:
-		t2 := t.Elem()
-		if t3, steps := lookupByType(t2, tname, level); t3 != nil {
-			step.IndirectSize = sizes.Sizeof(t2)
-			return t3, append([]zeroStep{step}, steps...)
-		}
-	case *types.Struct:
-		var fields []*types.Var
-		for i := 0; i < t.NumFields(); i++ {
-			field := t.Field(i)
-			fields = append(fields, field)
-			t2 := field.Type()
-
-			// TODO: quadratic work. perhaps replace with Alignof+Offsetof.
-			step.Offset = sizes.Offsetsof(fields)[i]
-			if t3, steps := lookupByType(t2, tname, level); t3 != nil {
-				if step.Offset == 0 {
-					return t3, steps
-				}
-				return t3, append([]zeroStep{step}, steps...)
-			}
-		}
-	}
-	return nil, nil
-}
-
-// fieldByName finds a struct's field by name, returning the field and its
-// offset within the struct.
-func fieldByName(st *types.Struct, name string) (vr *types.Var, offset int64) {
-	var fields []*types.Var
-	for i := 0; i < st.NumFields(); i++ {
-		field := st.Field(i)
-		fields = append(fields, field)
-		if field.Name() == name {
-			return field, sizes.Offsetsof(fields)[i]
-		}
-	}
-	return nil, 0
-}
-
-// templateFile creates a file at path and fills its contents with the
-// execution of the template with some data. It errors if the file exists or
-// cannot be created.
-func templateFile(path string, tmpl *template.Template, data interface{}) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	if err := tmpl.Execute(f, data); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close() // check for an error
-}
-
-type tmplData struct {
-	// InitCode is the init strategy used by the current Go version.
-	InitCode string
-
-	// Package is the non-test package being benchmarked.
-	*packages.Package
-	// Inits are the package paths of all the init functions to be
-	// benchmarked. By default, this will only contain the import path of
-	// the package itself. In recursive mode (-r), it will include the
-	// import paths of transitive dependencies too, excluding the ones whose
-	// initdone we can't mess with.
-	Inits []string
-
-	ToZero []toZero
-}
-
-type toZero struct {
-	PkgPath, Name string
-
-	InitialSize int64
-
-	Steps []zeroStep
-}
-
-type zeroStep struct {
-	// acts as a "oneof", so exactly one of the sections below must be set.
-
-	ZeroSize int64 // zero a number of bytes
-
-	IndirectSize int64 // pointer to a chunk of memory of a size
-
-	Offset int64 // byte offset, after a possible indirect
-}
-
-// Don't use StartTimer and StopTimer, as they call ReadMemStats, which is way
-// too expensive compared to most init functions.
-// For example, on 'benchinit cmd/go', ReadMemStats was taking up over 90% of
-// the cpu time, and throwing off all the numbers.
-
-var benchTmpl = template.Must(template.New("").Parse(`
-// Code generated by benchinit. DO NOT EDIT.
-
-package {{.Name}}_test
-
-import (
-	"encoding/binary"
-	"reflect"
-	"testing"
-	"unsafe" // must import unsafe to use go:linkname
-)
-
-func BenchmarkInit(b *testing.B) {
-	// Allocs tend to matter too, and have no downsides.
-	b.ReportAllocs()
-
-	for i := 0; i < b.N; i++ {
-		deinit() // get ready to run init again
-		{{ if eq .InitCode "initdone" }}
-		_init()
-		{{ else }}
-		_doInit(unsafe.Pointer(&_initdone0))
-		{{ end }}
-	}
-}
-
-// avoid unused import errors
-var _ binary.ByteOrder
-var _ unsafe.Pointer
-var _ reflect.SliceHeader
-
-// deinit undoes the work that the init functions being benchmarked do. In
-// particular, "initdone" is set to 0 to get init to do work again, and any
-// globals known to cause issues are reset.
-func deinit() {
-	{{- range $i, $g := .ToZero }}
-		{{- $last := (print "_zero" $i "_base") -}}
-		{{- range $j, $s := .Steps }}
-			{{- $cur := (print "_zero" $i "_" $j) -}}
-			{{- if ne $s.ZeroSize 0 }}
-	for i := 0; i < {{$s.ZeroSize}}; i++ {
-		{{$last}}[i] = 0
-	}
-
-			{{- else if ne $s.IndirectSize 0 }}
-	var {{$cur}} []byte
-	if ptr := uintptr(binary.LittleEndian.Uint64({{$last}}[:])); ptr != 0 {
-		// use a slice, to not copy the underlying bytes
-		hdr := (*reflect.SliceHeader)(unsafe.Pointer(&{{$cur}}))
-		hdr.Data = uintptr(binary.LittleEndian.Uint64({{$last}}[:]))
-		hdr.Len = {{$s.IndirectSize}}
-		hdr.Cap = {{$s.IndirectSize}}
-	} else {
-		dummy := [{{$s.IndirectSize}}]byte{}
-		{{$cur}} = dummy[:]
-	}
-
-			{{- else }}{{/* $s.Offset */}}
-	{{$cur}} := {{$last}}[{{$s.Offset}}:]
-
-			{{- end -}}
-			{{- $last = $cur -}}
-		{{- end -}}
-		{{- printf "\n" -}}
-	{{- end }}
-
-	{{- range $i, $_ := .Inits }}
-	_initdone{{$i}} = 0
-	{{- end }}
-}
-
-{{ range $i, $g := .ToZero }}
-//go:linkname _zero{{$i}}_base {{$g.PkgPath}}.{{$g.Name}}
-var _zero{{$i}}_base [{{$g.InitialSize}}]byte
-{{- end }}
-
-{{ if eq .InitCode "initdone" }}
-
-//go:linkname _init {{.PkgPath}}.init
-func _init()
-
-{{- range $i, $path := .Inits }}
-//go:linkname _initdone{{$i}} {{$path}}.initdone·
-var _initdone{{$i}} uint8
-{{- end }}
-
-{{- else -}}
-
-//go:linkname _doInit runtime.doInit
-func _doInit(t unsafe.Pointer) // t is an *initTask
-
-// We don't need the initTask type. We just need to get its address for doInit,
-// and modify its first field, an uintptr.
-
-{{- range $i, $path := .Inits }}
-//go:linkname _initdone{{$i}} {{$path}}..inittask
-var _initdone{{$i}} uintptr
-{{- end }}
-
-{{ end }}
-`[1:]))
-
-var stubTmpl = template.Must(template.New("").Parse(`
-// Code generated by benchinit. DO NOT EDIT.
-
-package {{.Name}}
-
-func init() {}
-`[1:]))
