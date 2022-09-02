@@ -98,8 +98,15 @@ func main1() int {
 	//	continuation: 1224	   961433 ns/op
 	var errorBuffer bytes.Buffer // to print the whole output if we fail
 	var benchinitResult string
+	var resultsPrinted int
 	rxBenchinitResult := regexp.MustCompile(`^benchinit: (.*)`)
-	rxFinalResult := regexp.MustCompile(`^continuation:\s+\d+\s`)
+	rxFinalResult := regexp.MustCompile(`^continuation:.*\d\s`)
+
+	// These must be printed directly as-is during normal runs.
+	// We don't need to worry about FAIL, as we already print the entire output
+	// on any failure.
+	rxPassthrough := regexp.MustCompile(`^(goos:|goarch:|pkg:|cpu:|PASS|ok\s)`)
+
 	scanner := bufio.NewScanner(io.TeeReader(pr, &errorBuffer))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -110,7 +117,10 @@ func main1() int {
 				panic("did not find benchinit's result?")
 			}
 			fmt.Println(benchinitResult)
+			resultsPrinted++
 			benchinitResult = ""
+		} else if rxPassthrough.MatchString(line) {
+			fmt.Println(line)
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -120,6 +130,10 @@ func main1() int {
 	if waitErr != nil {
 		// TODO: use ExitError.ExitCode() once we only support 1.12 and later.
 		fmt.Fprintf(os.Stderr, "wait: %v; output:\n%s\n", waitErr, errorBuffer.Bytes())
+		return 1
+	}
+	if resultsPrinted == 0 {
+		fmt.Fprintf(os.Stderr, "got no results; output:\n%s\n", errorBuffer.Bytes())
 		return 1
 	}
 	return 0
@@ -219,7 +233,7 @@ func BenchmarkInit(b *testing.B) {
 		// Break the line with a leading newline, show our separate results,
 		// and then let the continuation of the original line go below.
 		// TODO: include the -N CPU suffix, like in BenchmarkInit-16.
-		fmt.Printf("\nbenchinit: Benchmark%s\t%d\t%d ns/op\t%d B/op\t%d allocs/op\ncontinuation:",
+		fmt.Printf("\nbenchinit: Benchmark%s\t%d\t%d ns/op\t%d B/op\t%d allocs/op\ncontinuation: ",
 			name, b.N, totals.Clock.Nanoseconds()/int64(b.N), totals.Bytes/uint64(b.N), totals.Allocs/uint64(b.N))
 	}
 	// TODO: complain if any of our packages are not seen N times

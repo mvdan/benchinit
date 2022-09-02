@@ -15,7 +15,7 @@ stderr 'For example' # definitely includes our help text
 
 # missing flag argument
 benchinit -benchtime=10x -cpuprofile
-stdout '^BenchmarkInit'
+stdout '^BenchmarkTestTldFoo'
 ! stderr 'missing argument' # we pass it along like -cpuprofile=""
 
 -- go.mod --

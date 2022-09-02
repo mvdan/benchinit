@@ -1,9 +1,11 @@
 env HOME=$WORK/home
 
 benchinit -benchtime=10x .
-stdout '^BenchmarkInit'
+stdout '^BenchmarkTestTldFoo'
 stdout '\sns/op\s' # no-op bench shouldn't take tens of ms
-stdout '^ok\s*test\.tld/foo'
+stdout '\s0\sB/op\s' # no allocs
+stdout '\s0\sallocs/op\s' # no allocs
+stdout '^ok\s*command-line-arguments'
 ! stderr .
 
 # check that we didn't leave any temp files behind

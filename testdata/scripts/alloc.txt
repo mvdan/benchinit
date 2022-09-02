@@ -1,7 +1,7 @@
 env HOME=$WORK/home
 
 benchinit -benchtime=10x .
-stdout '^BenchmarkInit'
+stdout '^BenchmarkTestTldFoo'
 ! stdout '0 B/op\s*0 allocs/op' # does alloc
 ! stderr .
 

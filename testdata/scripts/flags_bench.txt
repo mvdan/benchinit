@@ -1,7 +1,7 @@
 env HOME=$WORK/home
 
 benchinit -benchtime=123x -v -memprofile=mem.out -cpuprofile cpu.out .
-stdout '^BenchmarkInit'
+stdout '^BenchmarkTestTldFoo'
 stdout '\s123\s'
 ! stderr .
 exists mem.out # -memprofile=mem.out

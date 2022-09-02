@@ -1,3 +1,5 @@
+skip '-r is a TODO in the new code'
+
 env HOME=$WORK/home
 
 benchinit -benchtime=10x .
