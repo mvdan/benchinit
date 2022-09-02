@@ -103,9 +103,9 @@ func main1() int {
 	rxFinalResult := regexp.MustCompile(`^continuation:.*\d\s`)
 
 	// These must be printed directly as-is during normal runs.
-	// We don't need to worry about FAIL, as we already print the entire output
-	// on any failure.
-	rxPassthrough := regexp.MustCompile(`^(goos:|goarch:|pkg:|cpu:|PASS|ok\s)`)
+	// We don't do "FAIL", as we already print the entire output on any failure.
+	// We don't do "ok", as we always only test one ad-hoc package.
+	rxPassthrough := regexp.MustCompile(`^(goos:|goarch:|pkg:|cpu:|PASS\s)`)
 
 	scanner := bufio.NewScanner(io.TeeReader(pr, &errorBuffer))
 	for scanner.Scan() {
