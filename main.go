@@ -43,21 +43,33 @@ func main1() int {
 		return 1
 	}
 
+	// From this point onwards, errors are straightforward.
+	if err := doBench(pkgs, testflags); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
+}
+
+func doBench(pkgs []*packages.Package, testflags []string) error {
 	// Prepare the packages to be benchmarked.
 	tmpFile, err := os.CreateTemp("", "benchinit_*_test.go")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "setup: %v\n", err)
-		return 1
+		return fmt.Errorf("setup: %w", err)
 	}
 	defer os.Remove(tmpFile.Name())
 	defer tmpFile.Close()
-	// mainTmpl.Execute(os.Stderr, pkgs) // for debugging
+
+	// for debugging
+	// println("--")
+	// mainTmpl.Execute(os.Stderr, pkgs)
+	// println("--")
+
 	if err := mainTmpl.Execute(tmpFile, pkgs); err != nil {
-		fmt.Fprintf(os.Stderr, "setup: %v\n", err)
-		return 1
+		return fmt.Errorf("setup: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
-		fmt.Fprintf(os.Stderr, "setup: %v\n", err)
+		return fmt.Errorf("setup: %w", err)
 	}
 
 	// Benchmark the packages with 'go test -bench'.
@@ -74,8 +86,7 @@ func main1() int {
 	cmd.Stdout = pw
 	cmd.Stderr = pw
 	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "start: %v\n", err)
-		return 1
+		return fmt.Errorf("start: %w", err)
 	}
 	var waitErr error
 	go func() {
@@ -125,19 +136,16 @@ func main1() int {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "scanner: %v\n", err)
-		return 1
+		return fmt.Errorf("scanner: %w", err)
 	}
 	if waitErr != nil {
 		// TODO: use ExitError.ExitCode() once we only support 1.12 and later.
-		fmt.Fprintf(os.Stderr, "wait: %v; output:\n%s\n", waitErr, errorBuffer.Bytes())
-		return 1
+		return fmt.Errorf("wait: %v; output:\n%s", waitErr, errorBuffer.Bytes())
 	}
 	if resultsPrinted == 0 {
-		fmt.Fprintf(os.Stderr, "got no results; output:\n%s\n", errorBuffer.Bytes())
-		return 1
+		return fmt.Errorf("got no results; output:\n%s", errorBuffer.Bytes())
 	}
-	return 0
+	return nil
 }
 
 // TODO: the import mechanism means we don't support main packages right now.
