@@ -104,8 +104,9 @@ func main1() int {
 
 	// These must be printed directly as-is during normal runs.
 	// We don't do "FAIL", as we already print the entire output on any failure.
-	// We don't do "ok", as we always only test one ad-hoc package.
-	rxPassthrough := regexp.MustCompile(`^(goos:|goarch:|pkg:|cpu:|PASS\s)`)
+	// We don't do "ok" nor "pkg:", as we always only test one ad-hoc package.
+	// Note that some may be "continuation" lines.
+	rxPassthrough := regexp.MustCompile(`^(continuation: )?((goos:|goarch:|cpu:|PASS\s).*)`)
 
 	scanner := bufio.NewScanner(io.TeeReader(pr, &errorBuffer))
 	for scanner.Scan() {
@@ -119,8 +120,8 @@ func main1() int {
 			fmt.Println(benchinitResult)
 			resultsPrinted++
 			benchinitResult = ""
-		} else if rxPassthrough.MatchString(line) {
-			fmt.Println(line)
+		} else if match := rxPassthrough.FindStringSubmatch(line); match != nil {
+			fmt.Println(match[2])
 		}
 	}
 	if err := scanner.Err(); err != nil {
