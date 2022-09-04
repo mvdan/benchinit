@@ -18,6 +18,10 @@ benchinit -benchtime=10x -cpuprofile
 stdout '^BenchmarkTestTldFoo'
 ! stderr 'missing argument' # we pass it along like -cpuprofile=""
 
+! benchinit -benchtime=10x ./nopkg
+! stdout .
+stderr 'nopkg: directory not found'
+
 -- go.mod --
 module test.tld/foo
 -- empty.go --

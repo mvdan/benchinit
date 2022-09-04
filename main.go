@@ -72,8 +72,8 @@ func listPackages(flags, args []string) ([]*Package, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("list: %w", err)
 	}
-	var waitErr error
-	go func() { waitErr = cmd.Wait() }()
+	waitErr := make(chan error, 1)
+	go func() { waitErr <- cmd.Wait() }()
 
 	dec := json.NewDecoder(pr)
 	for {
@@ -85,7 +85,7 @@ func listPackages(flags, args []string) ([]*Package, error) {
 		}
 		pkgs = append(pkgs, &pkg)
 	}
-	if waitErr != nil {
+	if err := <-waitErr; err != nil {
 		return nil, fmt.Errorf("list: %v:\n%s", err, stderr.Bytes())
 	}
 	return pkgs, nil
@@ -195,9 +195,9 @@ func doBench(pkgs []*Package, testflags []string) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start: %w", err)
 	}
-	var waitErr error
+	waitErr := make(chan error, 1)
 	go func() {
-		waitErr = cmd.Wait()
+		waitErr <- cmd.Wait()
 		pw.Close()
 	}()
 
@@ -245,7 +245,7 @@ func doBench(pkgs []*Package, testflags []string) error {
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("scanner: %w", err)
 	}
-	if waitErr != nil {
+	if err := <-waitErr; err != nil {
 		// TODO: use ExitError.ExitCode() once we only support 1.12 and later.
 		return fmt.Errorf("wait: %v; output:\n%s", waitErr, errorBuffer.Bytes())
 	}
