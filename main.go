@@ -16,8 +16,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-
-	"golang.org/x/tools/go/packages"
 )
 
 // keep in sync with benchmain_test.go.
@@ -41,17 +39,10 @@ func main1() int {
 		}
 		return 2
 	}
-
-	// Load the packages.
-	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedFiles,
-	}
-	pkgs, err := packages.Load(cfg, flagSet.Args()...)
+	// TODO: forward build flags, but not other test flags
+	pkgs, err := listPackages(nil, flagSet.Args())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "load: %v\n", err)
-		return 1
-	}
-	if packages.PrintErrors(pkgs) > 0 {
+		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 
@@ -63,7 +54,55 @@ func main1() int {
 	return 0
 }
 
-func doBench(pkgs []*packages.Package, testflags []string) error {
+// listPackages is akin to go/packages, but more specific to `go list`.
+// In particular, it helps us reach fields like Dir and Deps.
+// Moreover, by using `go test`, we are tightly coupled with cmd/go already.
+func listPackages(flags, args []string) ([]*Package, error) {
+	// Load the packages.
+	var pkgs []*Package
+	listArgs := []string{"list", "-json"}
+	listArgs = append(listArgs, args...)
+	cmd := exec.Command("go", listArgs...)
+	pr, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("list: %w", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("list: %w", err)
+	}
+	var waitErr error
+	go func() { waitErr = cmd.Wait() }()
+
+	dec := json.NewDecoder(pr)
+	for {
+		var pkg Package
+		if err := dec.Decode(&pkg); err == io.EOF {
+			break
+		} else if err != nil {
+			return nil, fmt.Errorf("list: %w", err)
+		}
+		pkgs = append(pkgs, &pkg)
+	}
+	if waitErr != nil {
+		return nil, fmt.Errorf("list: %v:\n%s", err, stderr.Bytes())
+	}
+	return pkgs, nil
+}
+
+type Package struct {
+	Dir        string
+	ImportPath string
+	Name       string
+
+	GoFiles      []string
+	TestGoFiles  []string
+	XTestGoFiles []string
+	Deps         []string
+}
+
+func doBench(pkgs []*Package, testflags []string) error {
 	// Prepare the packages to be benchmarked.
 	tmpDir, err := os.MkdirTemp("", "benchinit")
 	if err != nil {
@@ -74,29 +113,24 @@ func doBench(pkgs []*packages.Package, testflags []string) error {
 		Replace: make(map[string]string, len(pkgs)),
 	}
 	var input benchmainInput
-	var mainPkg *packages.Package
-	var mainDir string
+	var mainPkg *Package
 	for _, pkg := range pkgs {
-		input.BenchPkgs = append(input.BenchPkgs, pkg.PkgPath)
+		input.BenchPkgs = append(input.BenchPkgs, pkg.ImportPath)
 		if pkg.Name != "main" {
 			continue
 		}
 		if mainPkg != nil {
-			return fmt.Errorf("can only benchmark up to one main package at a time; found %s and %s", mainPkg.PkgPath, pkg.PkgPath)
+			return fmt.Errorf("can only benchmark up to one main package at a time; found %s and %s", mainPkg.ImportPath, pkg.ImportPath)
 		}
 		mainPkg = pkg
-		// Until go/packages.Package.Dir exists.
-		mainDir = filepath.Dir(pkg.GoFiles[0])
 	}
 	if mainPkg == nil {
-		// Until go/packages.Package.Dir exists.
 		mainPkg = pkgs[0]
-		mainDir = filepath.Dir(pkgs[0].GoFiles[0])
 	}
 
 	// Pretend like the main package we use for testing does not have any other
 	// test files, as we are not interested in the init cost of tests.
-	testFiles, err := filepath.Glob(filepath.Join(mainDir, "*_test.go"))
+	testFiles, err := filepath.Glob(filepath.Join(mainPkg.Dir, "*_test.go"))
 	if err != nil {
 		return fmt.Errorf("setup: %w", err)
 	}
@@ -118,7 +152,7 @@ func doBench(pkgs []*packages.Package, testflags []string) error {
 	if err := os.WriteFile(replaceDst, []byte(benchmain), 0o666); err != nil {
 		return fmt.Errorf("setup: %w", err)
 	}
-	replaceSrc := filepath.Join(mainDir, genName)
+	replaceSrc := filepath.Join(mainPkg.Dir, genName)
 	overlay.Replace[replaceSrc] = replaceDst
 
 	args := []string{
@@ -149,7 +183,7 @@ func doBench(pkgs []*packages.Package, testflags []string) error {
 
 	// Benchmark the packages with 'go test -bench'.
 	args = append(args, testflags...) // add the user's test args
-	args = append(args, mainDir)
+	args = append(args, mainPkg.Dir)
 	cmd := exec.Command("go", args...)
 	pr, pw, err := os.Pipe()
 	if err != nil {
