@@ -67,8 +67,7 @@ func BenchmarkGeneratedBenchinit(b *testing.B) {
 			b.Fatalf("%v: %s", err, out)
 		}
 		for _, match := range rxInitTrace.FindAllSubmatch(out, -1) {
-			pkg := string(match[rxIndexPkg])
-			totals := pkgTotals[pkg]
+			totals := pkgTotals[string(match[rxIndexPkg])]
 			if totals == nil {
 				continue // we are not interested in this package
 			}

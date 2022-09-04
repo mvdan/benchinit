@@ -152,6 +152,9 @@ func doBench(pkgs []*packages.Package, testflags []string) error {
 	args = append(args, mainDir)
 	cmd := exec.Command("go", args...)
 	pr, pw, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("start: %w", err)
+	}
 	cmd.Stdout = pw
 	cmd.Stderr = pw
 	cmd.Env = append(os.Environ(), "BENCHINIT_JSON_INPUT="+inputPath)
