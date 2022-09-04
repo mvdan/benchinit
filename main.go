@@ -6,11 +6,13 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"text/template"
@@ -53,34 +55,81 @@ func main1() int {
 
 func doBench(pkgs []*packages.Package, testflags []string) error {
 	// Prepare the packages to be benchmarked.
-	tmpFile, err := os.CreateTemp("", "benchinit_*_test.go")
+	tmpDir, err := os.MkdirTemp("", "benchinit")
 	if err != nil {
 		return fmt.Errorf("setup: %w", err)
 	}
-	defer os.Remove(tmpFile.Name())
-	defer tmpFile.Close()
+	defer os.RemoveAll(tmpDir)
+	overlay := struct{ Replace map[string]string }{
+		Replace: make(map[string]string, len(pkgs)),
+	}
+	var mainPkg *packages.Package
+	var mainDir string
+	for _, pkg := range pkgs {
+		if pkg.Name != "main" {
+			continue
+		}
+		if mainPkg != nil {
+			return fmt.Errorf("can only benchmark up to one main package at a time; found %s and %s", mainPkg.PkgPath, pkg.PkgPath)
+		}
+		mainPkg = pkg
+		// Until go/packages.Package.Dir exists.
+		mainDir = filepath.Dir(pkg.GoFiles[0])
+	}
+	if mainPkg == nil {
+		// Until go/packages.Package.Dir exists.
+		mainPkg = pkgs[0]
+		mainDir = filepath.Dir(pkgs[0].GoFiles[0])
+	}
+	const genName = "benchinit_generated_test.go"
+	replaceDst := filepath.Join(tmpDir, genName)
 
+	tmpFile, err := os.Create(replaceDst)
+	if err != nil {
+		return fmt.Errorf("setup: %w", err)
+	}
+
+	tmplData := struct {
+		MainPkgName string
+		Pkgs        []*packages.Package
+	}{
+		MainPkgName: mainPkg.Name,
+		Pkgs:        pkgs,
+	}
 	// for debugging
 	// println("--")
-	// mainTmpl.Execute(os.Stderr, pkgs)
+	// mainTmpl.Execute(os.Stderr, tmplData)
 	// println("--")
 
-	if err := mainTmpl.Execute(tmpFile, pkgs); err != nil {
+	if err := mainTmpl.Execute(tmpFile, tmplData); err != nil {
 		return fmt.Errorf("setup: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
 		return fmt.Errorf("setup: %w", err)
 	}
 
-	// Benchmark the packages with 'go test -bench'.
 	args := []string{
 		"test",
-		"-run=^$",                // disable all tests
-		"-vet=off",               // disable vet
-		"-bench=^BenchmarkInit$", // only run the one benchmark
+		"-run=^$",                              // disable all tests
+		"-vet=off",                             // disable vet
+		"-bench=^BenchmarkGeneratedBenchinit$", // only run the one benchmark
 	}
+
+	replaceSrc := filepath.Join(mainDir, genName)
+	overlay.Replace[replaceSrc] = replaceDst
+	overlayBytes, err := json.Marshal(overlay)
+	if err != nil {
+		return fmt.Errorf("setup: %w", err)
+	}
+	overlayPath := filepath.Join(tmpDir, "overlay.json")
+	if err := os.WriteFile(overlayPath, overlayBytes, 0o666); err != nil {
+		return fmt.Errorf("setup: %w", err)
+	}
+	args = append(args, "-overlay="+overlayPath)
+
+	// Benchmark the packages with 'go test -bench'.
 	args = append(args, testflags...) // add the user's test args
-	args = append(args, tmpFile.Name())
+	args = append(args, mainDir)
 	cmd := exec.Command("go", args...)
 	pr, pw, err := os.Pipe()
 	cmd.Stdout = pw
@@ -98,9 +147,9 @@ func doBench(pkgs []*packages.Package, testflags []string) error {
 	// Note that "go test" will often run a benchmark function multiple times
 	// with increasing b.N values, to estimate an N for e.g. -benchtime=1s.
 	// We only want the last benchinit result, the one directly followed by the
-	// original continuation to the BenchmarkInit line. For example:
+	// original continuation to the BenchmarkGeneratedBenchinit line. For example:
 	//
-	//	BenchmarkInit-16
+	//	BenchmarkGeneratedBenchinit-16
 	//	benchinit: BenchmarkGoBuild	1	7000 ns/op	5344 B/op	47 allocs/op
 	//	continuation:
 	//	benchinit: BenchmarkGoBuild	100	5880 ns/op	5080 B/op	45 allocs/op
@@ -153,7 +202,7 @@ func doBench(pkgs []*packages.Package, testflags []string) error {
 // meaning that we should only support one main package per invocation at most.
 
 var mainTmpl = template.Must(template.New("").Parse(`
-package main
+package {{ .MainPkgName }}_test
 
 import (
 	"os"
@@ -165,18 +214,18 @@ import (
 	"strings"
 	"regexp"
 
-	{{ range $_, $pkg := . -}}
+	{{ range $_, $pkg := .Pkgs -}}
 	_ {{ printf "%q" $pkg.PkgPath }}
 	{{- end }}
 )
 
-func BenchmarkInit(b *testing.B) {
+func BenchmarkGeneratedBenchinit(b *testing.B) {
 	execPath, err := os.Executable()
 	if err != nil {
 		b.Fatal(err)
 	}
 	pkgs := []string{
-		{{ range $_, $pkg := . -}}
+		{{ range $_, $pkg := .Pkgs -}}
 			{{ printf "%q" $pkg.PkgPath }},
 		{{- end }}
 	}
@@ -201,8 +250,10 @@ func BenchmarkInit(b *testing.B) {
 		// TODO: do not override existing GODEBUG values
 		cmd.Env = append(os.Environ(), "GODEBUG=inittrace=1")
 		out, err := cmd.CombinedOutput()
-		if err != nil {
-			b.Fatal(err)
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 2 {
+			// Sometimes -h will result in an exit code 2 rather than 0.
+		} else if err != nil {
+			b.Fatalf("%v: %s", err, out)
 		}
 		for _, match := range rxInitTrace.FindAllSubmatch(out, -1) {
 			pkg := string(match[rxIndexPkg])
@@ -237,11 +288,11 @@ func BenchmarkInit(b *testing.B) {
 		name = strings.Title(name)
 		name = strings.ReplaceAll(name, " ", "")
 
-		// We are printing between "BenchmarkInit" and its results,
+		// We are printing between "BenchmarkGeneratedBenchinit" and its results,
 		// which would usually go on the same line.
 		// Break the line with a leading newline, show our separate results,
 		// and then let the continuation of the original line go below.
-		// TODO: include the -N CPU suffix, like in BenchmarkInit-16.
+		// TODO: include the -N CPU suffix, like in BenchmarkGeneratedBenchinit-16.
 		fmt.Printf("\nbenchinit: Benchmark%s\t%d\t%d ns/op\t%d B/op\t%d allocs/op\ncontinuation: ",
 			name, b.N, totals.Clock.Nanoseconds()/int64(b.N), totals.Bytes/uint64(b.N), totals.Allocs/uint64(b.N))
 	}

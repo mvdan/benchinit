@@ -1,0 +1,13 @@
+env HOME=$WORK/home
+
+benchinit -benchtime=10x cmd/go
+stdout '^BenchmarkCmdGo'
+! stdout '0 B/op\s*0 allocs/op' # does alloc
+! stderr .
+
+benchinit -benchtime=10x internal/buildcfg
+stdout '^BenchmarkInternalBuildcfg'
+! stdout '0 B/op\s*0 allocs/op' # does alloc
+! stderr .
+-- go.mod --
+module test.tld/foo

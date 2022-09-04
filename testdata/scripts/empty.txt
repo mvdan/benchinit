@@ -14,7 +14,6 @@ stdout '\s0\sallocs/op\s' # no allocs
 
 # check that we didn't leave any temp files behind
 ! exists benchinit_generated_test.go
-! exists benchinit_init_stub.go
 ! exists foo
 ! exists foo.test
 
