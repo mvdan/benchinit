@@ -130,11 +130,10 @@ func doBench(pkgs []*Package, testflags []string) error {
 
 	// Pretend like the main package we use for testing does not have any other
 	// test files, as we are not interested in the init cost of tests.
-	testFiles, err := filepath.Glob(filepath.Join(mainPkg.Dir, "*_test.go"))
-	if err != nil {
-		return fmt.Errorf("setup: %w", err)
+	for _, testFile := range mainPkg.TestGoFiles {
+		overlay.Replace[testFile] = ""
 	}
-	for _, testFile := range testFiles {
+	for _, testFile := range mainPkg.XTestGoFiles {
 		overlay.Replace[testFile] = ""
 	}
 
