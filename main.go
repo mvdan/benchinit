@@ -15,12 +15,26 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
+
+	"golang.org/x/exp/maps"
 )
 
-// keep in sync with benchmain_test.go.
+// TODO: "recursive" should exclude the init cost of runtime and its deps,
+// as those can never be avoided as part of a program's init.
+var recursive = flagSet.Bool("r", false, "include init costs of transitive dependencies")
+
+// keep benchmain types in sync with benchmain_test.go.
 type benchmainInput struct {
-	BenchPkgs []string
+	AllImportPaths []string
+	BenchPkgs      []benchmainPackage
+
+	Recursive bool
+}
+type benchmainPackage struct {
+	ImportPath string
+	Deps       []string
 }
 
 //go:embed benchmain_test.go
@@ -112,10 +126,20 @@ func doBench(pkgs []*Package, testflags []string) error {
 	overlay := struct{ Replace map[string]string }{
 		Replace: make(map[string]string, len(pkgs)),
 	}
-	var input benchmainInput
+	input := benchmainInput{Recursive: *recursive}
 	var mainPkg *Package
+	allPkgs := make(map[string]bool)
 	for _, pkg := range pkgs {
-		input.BenchPkgs = append(input.BenchPkgs, pkg.ImportPath)
+		allPkgs[pkg.ImportPath] = true
+		for _, dep := range pkg.Deps {
+			allPkgs[dep] = true
+		}
+
+		input.BenchPkgs = append(input.BenchPkgs, benchmainPackage{
+			ImportPath: pkg.ImportPath,
+			Deps:       pkg.Deps,
+		})
+
 		if pkg.Name != "main" {
 			continue
 		}
@@ -124,6 +148,9 @@ func doBench(pkgs []*Package, testflags []string) error {
 		}
 		mainPkg = pkg
 	}
+	input.AllImportPaths = maps.Keys(allPkgs)
+	sort.Strings(input.AllImportPaths)
+
 	if mainPkg == nil {
 		mainPkg = pkgs[0]
 	}

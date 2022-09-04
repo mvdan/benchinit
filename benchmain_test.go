@@ -17,9 +17,16 @@ import (
 
 //go:insert imports (TODO: not used yet)
 
-// keep in sync with main.go.
+// keep benchmain types in sync with main.go.
 type benchmainInput struct {
-	BenchPkgs []string
+	AllImportPaths []string
+	BenchPkgs      []benchmainPackage
+
+	Recursive bool
+}
+type benchmainPackage struct {
+	ImportPath string
+	Deps       []string
 }
 
 func BenchmarkGeneratedBenchinit(b *testing.B) {
@@ -45,8 +52,8 @@ func BenchmarkGeneratedBenchinit(b *testing.B) {
 		Bytes  uint64
 		Allocs uint64
 	}
-	pkgTotals := make(map[string]*totals, len(input.BenchPkgs))
-	for _, pkg := range input.BenchPkgs {
+	pkgTotals := make(map[string]*totals, len(input.AllImportPaths))
+	for _, pkg := range input.AllImportPaths {
 		pkgTotals[pkg] = new(totals)
 	}
 
@@ -67,9 +74,10 @@ func BenchmarkGeneratedBenchinit(b *testing.B) {
 			b.Fatalf("%v: %s", err, out)
 		}
 		for _, match := range rxInitTrace.FindAllSubmatch(out, -1) {
-			totals := pkgTotals[string(match[rxIndexPkg])]
+			pkg := string(match[rxIndexPkg])
+			totals := pkgTotals[pkg]
 			if totals == nil {
-				continue // we are not interested in this package
+				continue // not a package we count, e.g. runtime
 			}
 			clock, err := time.ParseDuration(strings.Replace(string(match[rxIndexClock]), " ", "", 1))
 			if err != nil {
@@ -89,10 +97,19 @@ func BenchmarkGeneratedBenchinit(b *testing.B) {
 		}
 	}
 	for _, pkg := range input.BenchPkgs {
-		totals := *pkgTotals[pkg]
+		totals := *pkgTotals[pkg.ImportPath]
+
+		if input.Recursive {
+			for _, dep := range pkg.Deps {
+				depTotals := *pkgTotals[dep]
+				totals.Clock += depTotals.Clock
+				totals.Bytes += depTotals.Bytes
+				totals.Allocs += depTotals.Allocs
+			}
+		}
 
 		// Turn "golang.org/x/foo" into "GolangOrgXFoo".
-		name := pkg
+		name := pkg.ImportPath
 		name = strings.ReplaceAll(name, "/", " ")
 		name = strings.ReplaceAll(name, ".", " ")
 		name = strings.Title(name)
