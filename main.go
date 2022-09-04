@@ -35,7 +35,9 @@ func main1() int {
 	}
 
 	// Load the packages.
-	cfg := &packages.Config{Mode: packages.LoadAllSyntax}
+	cfg := &packages.Config{
+		Mode: packages.NeedName | packages.NeedFiles,
+	}
 	pkgs, err := packages.Load(cfg, flagSet.Args()...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load: %v\n", err)
@@ -81,6 +83,18 @@ func doBench(pkgs []*packages.Package, testflags []string) error {
 		mainPkg = pkgs[0]
 		mainDir = filepath.Dir(pkgs[0].GoFiles[0])
 	}
+
+	// Pretend like the main package we use for testing does not have any other
+	// test files, as we are not interested in the init cost of tests.
+	testFiles, err := filepath.Glob(filepath.Join(mainDir, "*_test.go"))
+	if err != nil {
+		return fmt.Errorf("setup: %w", err)
+	}
+	for _, testFile := range testFiles {
+		overlay.Replace[testFile] = ""
+	}
+
+	// Place our template in the main package's directory via the overlay.
 	const genName = "benchinit_generated_test.go"
 	replaceDst := filepath.Join(tmpDir, genName)
 
@@ -100,13 +114,14 @@ func doBench(pkgs []*packages.Package, testflags []string) error {
 	// println("--")
 	// mainTmpl.Execute(os.Stderr, tmplData)
 	// println("--")
-
 	if err := mainTmpl.Execute(tmpFile, tmplData); err != nil {
 		return fmt.Errorf("setup: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
 		return fmt.Errorf("setup: %w", err)
 	}
+	replaceSrc := filepath.Join(mainDir, genName)
+	overlay.Replace[replaceSrc] = replaceDst
 
 	args := []string{
 		"test",
@@ -114,9 +129,6 @@ func doBench(pkgs []*packages.Package, testflags []string) error {
 		"-vet=off",                             // disable vet
 		"-bench=^BenchmarkGeneratedBenchinit$", // only run the one benchmark
 	}
-
-	replaceSrc := filepath.Join(mainDir, genName)
-	overlay.Replace[replaceSrc] = replaceDst
 	overlayBytes, err := json.Marshal(overlay)
 	if err != nil {
 		return fmt.Errorf("setup: %w", err)
