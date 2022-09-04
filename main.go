@@ -6,6 +6,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	_ "embed"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -15,10 +16,17 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"text/template"
 
 	"golang.org/x/tools/go/packages"
 )
+
+// keep in sync with benchmain_test.go.
+type benchmainInput struct {
+	BenchPkgs []string
+}
+
+//go:embed benchmain_test.go
+var benchmainSource string
 
 func main() { os.Exit(main1()) }
 
@@ -65,9 +73,11 @@ func doBench(pkgs []*packages.Package, testflags []string) error {
 	overlay := struct{ Replace map[string]string }{
 		Replace: make(map[string]string, len(pkgs)),
 	}
+	var input benchmainInput
 	var mainPkg *packages.Package
 	var mainDir string
 	for _, pkg := range pkgs {
+		input.BenchPkgs = append(input.BenchPkgs, pkg.PkgPath)
 		if pkg.Name != "main" {
 			continue
 		}
@@ -96,28 +106,16 @@ func doBench(pkgs []*packages.Package, testflags []string) error {
 
 	// Place our template in the main package's directory via the overlay.
 	const genName = "benchinit_generated_test.go"
-	replaceDst := filepath.Join(tmpDir, genName)
 
-	tmpFile, err := os.Create(replaceDst)
-	if err != nil {
-		return fmt.Errorf("setup: %w", err)
-	}
+	benchmain := benchmainSource
+	benchmain = strings.Replace(benchmain, "package main_test\n", "package "+mainPkg.Name+"_test\n", 1)
 
-	tmplData := struct {
-		MainPkgName string
-		Pkgs        []*packages.Package
-	}{
-		MainPkgName: mainPkg.Name,
-		Pkgs:        pkgs,
-	}
 	// for debugging
 	// println("--")
-	// mainTmpl.Execute(os.Stderr, tmplData)
+	// println(benchmain)
 	// println("--")
-	if err := mainTmpl.Execute(tmpFile, tmplData); err != nil {
-		return fmt.Errorf("setup: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
+	replaceDst := filepath.Join(tmpDir, genName)
+	if err := os.WriteFile(replaceDst, []byte(benchmain), 0o666); err != nil {
 		return fmt.Errorf("setup: %w", err)
 	}
 	replaceSrc := filepath.Join(mainDir, genName)
@@ -129,6 +127,7 @@ func doBench(pkgs []*packages.Package, testflags []string) error {
 		"-vet=off",                             // disable vet
 		"-bench=^BenchmarkGeneratedBenchinit$", // only run the one benchmark
 	}
+
 	overlayBytes, err := json.Marshal(overlay)
 	if err != nil {
 		return fmt.Errorf("setup: %w", err)
@@ -139,6 +138,15 @@ func doBench(pkgs []*packages.Package, testflags []string) error {
 	}
 	args = append(args, "-overlay="+overlayPath)
 
+	inputBytes, err := json.Marshal(input)
+	if err != nil {
+		return fmt.Errorf("setup: %w", err)
+	}
+	inputPath := filepath.Join(tmpDir, "input.json")
+	if err := os.WriteFile(inputPath, inputBytes, 0o666); err != nil {
+		return fmt.Errorf("setup: %w", err)
+	}
+
 	// Benchmark the packages with 'go test -bench'.
 	args = append(args, testflags...) // add the user's test args
 	args = append(args, mainDir)
@@ -146,6 +154,7 @@ func doBench(pkgs []*packages.Package, testflags []string) error {
 	pr, pw, err := os.Pipe()
 	cmd.Stdout = pw
 	cmd.Stderr = pw
+	cmd.Env = append(os.Environ(), "BENCHINIT_JSON_INPUT="+inputPath)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start: %w", err)
 	}
@@ -208,109 +217,6 @@ func doBench(pkgs []*packages.Package, testflags []string) error {
 	}
 	return nil
 }
-
-// TODO: the import mechanism means we don't support main packages right now.
-// Importing the main package is only possible by placing the test file in it,
-// meaning that we should only support one main package per invocation at most.
-
-var mainTmpl = template.Must(template.New("").Parse(`
-package {{ .MainPkgName }}_test
-
-import (
-	"os"
-	"strconv"
-	"os/exec"
-	"testing"
-	"time"
-	"fmt"
-	"strings"
-	"regexp"
-
-	{{ range $_, $pkg := .Pkgs -}}
-	_ {{ printf "%q" $pkg.PkgPath }}
-	{{- end }}
-)
-
-func BenchmarkGeneratedBenchinit(b *testing.B) {
-	execPath, err := os.Executable()
-	if err != nil {
-		b.Fatal(err)
-	}
-	pkgs := []string{
-		{{ range $_, $pkg := .Pkgs -}}
-			{{ printf "%q" $pkg.PkgPath }},
-		{{- end }}
-	}
-	type totals struct {
-		Clock  time.Duration
-		Bytes  uint64
-		Allocs uint64
-	}
-	pkgTotals := make(map[string]*totals, len(pkgs))
-	for _, pkg := range pkgs {
-		pkgTotals[pkg] = new(totals)
-	}
-
-	rxInitTrace := regexp.MustCompile(` + "`" + `(?m)^init (?P<pkg>[^ ]+) (?P<time>@[^ ]+ [^ ]+), (?P<clock>[^ ]+ [^ ]+) clock, (?P<bytes>[^ ]+) bytes, (?P<allocs>[^ ]+) allocs$` + "`" + `)
-	rxIndexPkg := rxInitTrace.SubexpIndex("pkg")
-	rxIndexClock := rxInitTrace.SubexpIndex("clock")
-	rxIndexBytes := rxInitTrace.SubexpIndex("bytes")
-	rxIndexAllocs := rxInitTrace.SubexpIndex("allocs")
-
-	for i := 0; i < b.N; i++ {
-		cmd := exec.Command(execPath, "-h")
-		// TODO: do not override existing GODEBUG values
-		cmd.Env = append(os.Environ(), "GODEBUG=inittrace=1")
-		out, err := cmd.CombinedOutput()
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 2 {
-			// Sometimes -h will result in an exit code 2 rather than 0.
-		} else if err != nil {
-			b.Fatalf("%v: %s", err, out)
-		}
-		for _, match := range rxInitTrace.FindAllSubmatch(out, -1) {
-			pkg := string(match[rxIndexPkg])
-			totals := pkgTotals[pkg]
-			if totals == nil {
-				continue // we are not interested in this package
-			}
-			clock, err := time.ParseDuration(strings.Replace(string(match[rxIndexClock]), " ", "", 1))
-			if err != nil {
-				b.Fatal(err)
-			}
-			bytes, err := strconv.ParseUint(string(match[rxIndexBytes]), 10, 64)
-			if err != nil {
-				b.Fatal(err)
-			}
-			allocs, err := strconv.ParseUint(string(match[rxIndexAllocs]), 10, 64)
-			if err != nil {
-				b.Fatal(err)
-			}
-			totals.Clock += clock
-			totals.Bytes += bytes
-			totals.Allocs += allocs
-		}
-	}
-	for _, pkg := range pkgs {
-		totals := *pkgTotals[pkg]
-
-		// Turn "golang.org/x/foo" into "GolangOrgXFoo".
-		name := pkg
-		name = strings.ReplaceAll(name, "/", " ")
-		name = strings.ReplaceAll(name, ".", " ")
-		name = strings.Title(name)
-		name = strings.ReplaceAll(name, " ", "")
-
-		// We are printing between "BenchmarkGeneratedBenchinit" and its results,
-		// which would usually go on the same line.
-		// Break the line with a leading newline, show our separate results,
-		// and then let the continuation of the original line go below.
-		// TODO: include the -N CPU suffix, like in BenchmarkGeneratedBenchinit-16.
-		fmt.Printf("\nbenchinit: Benchmark%s\t%d\t%d ns/op\t%d B/op\t%d allocs/op\ncontinuation: ",
-			name, b.N, totals.Clock.Nanoseconds()/int64(b.N), totals.Bytes/uint64(b.N), totals.Allocs/uint64(b.N))
-	}
-	// TODO: complain if any of our packages are not seen N times
-}
-`))
 
 // testFlag is copied from cmd/go/internal/test/testflag.go's testFlagDefn, with
 // small modifications.
