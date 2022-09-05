@@ -1,15 +1,15 @@
 env HOME=$WORK/home
 
-benchinit -benchtime=10x cmd/go
+exec benchinit -benchtime=10x cmd/go
 stdout '^BenchmarkCmdGo'
 ! stdout '0 B/op\s*0 allocs/op' # does alloc
 ! stderr .
 
-! benchinit cmd/go cmd/compile
+! exec benchinit cmd/go cmd/compile
 ! stdout .
 stderr 'one main package at a time'
 
-benchinit -benchtime=10x internal/buildcfg
+exec benchinit -benchtime=10x internal/buildcfg
 stdout '^BenchmarkInternalBuildcfg'
 ! stdout '0 B/op\s*0 allocs/op' # does alloc
 ! stderr .

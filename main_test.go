@@ -20,6 +20,7 @@ func TestMain(m *testing.M) {
 func TestScripts(t *testing.T) {
 	t.Parallel()
 	testscript.Run(t, testscript.Params{
-		Dir: filepath.Join("testdata", "script"),
+		Dir:                 filepath.Join("testdata", "script"),
+		RequireExplicitExec: true,
 	})
 }

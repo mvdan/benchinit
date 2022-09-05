@@ -1,6 +1,6 @@
 env HOME=$WORK/home
 
-benchinit -benchtime=10x .
+exec benchinit -benchtime=10x .
 stdout '^BenchmarkTestTldFoo'
 stdout '\sns/op\s' # no-op bench shouldn't take tens of ms
 stdout '\s0\sB/op\s' # no allocs

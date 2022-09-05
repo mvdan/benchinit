@@ -1,10 +1,10 @@
 env HOME=$WORK/home
 
-benchinit -benchtime=10x .
+exec benchinit -benchtime=10x .
 stdout '^BenchmarkTestTldFoo'
 stdout '0 B/op\s*0 allocs/op' # doesn't alloc
 
-benchinit -r -benchtime=10x .
+exec benchinit -r -benchtime=10x .
 stdout '^BenchmarkTestTldFoo'
 ! stdout '0 B/op\s*0 allocs/op' # imported pkg allocs
 

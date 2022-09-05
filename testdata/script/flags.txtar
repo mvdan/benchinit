@@ -1,6 +1,6 @@
 env HOME=$WORK/home
 
-! benchinit -benchtime=10x -h
+! exec benchinit -benchtime=10x -h
 ! stderr 'flag provided but not defined'
 stderr 'Usage of benchinit'
 stderr 'For example' # definitely includes our help text
@@ -8,21 +8,21 @@ stderr 'For example' # definitely includes our help text
 ! stderr '-test\.' # don't show the test binary's usage func
 
 # unknown flags are passed to the test binary, as they might be new test flags
-! benchinit -benchtime=10x -badflag
+! exec benchinit -benchtime=10x -badflag
 stderr 'flag provided but not defined'
 ! stderr 'Usage of benchinit'
 stderr '-test\.'
 
 # missing flag argument
-benchinit -benchtime=10x -cpuprofile
+exec benchinit -benchtime=10x -cpuprofile
 stdout '^BenchmarkTestTldFoo'
 ! stderr 'missing argument' # we pass it along like -cpuprofile=""
 
-! benchinit -benchtime=10x ./nopkg
+! exec benchinit -benchtime=10x ./nopkg
 ! stdout .
 stderr 'nopkg: directory not found'
 
-! benchinit -benchtime=10x -tags=buildtag .
+! exec benchinit -benchtime=10x -tags=buildtag .
 ! stdout .
 stderr 'buildtag panics at init time'
 
