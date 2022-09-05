@@ -161,22 +161,15 @@ func doBench(pkgs []*Package, buildflags, testflags []string) error {
 	args = append(args, testflags...)  // add the user's test flags
 	args = append(args, mainPkg.Dir)
 	cmd := exec.Command("go", args...)
-	pr, pw, err := os.Pipe()
+	pr, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("start: %w", err)
+		return fmt.Errorf("test: %w", err)
 	}
-	cmd.Stdout = pw
-	cmd.Stderr = pw
+	cmd.Stderr = cmd.Stdout
 	cmd.Env = append(os.Environ(), "BENCHINIT_JSON_INPUT="+inputPath)
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start: %w", err)
+		return fmt.Errorf("test: %w", err)
 	}
-	waitErr := make(chan error, 1)
-	go func() {
-		waitErr <- cmd.Wait()
-		pw.Close()
-	}()
-
 	// Get our benchinit result lines.
 	// Note that "go test" will often run a benchmark function multiple times
 	// with increasing b.N values, to estimate an N for e.g. -benchtime=1s.
@@ -221,9 +214,8 @@ func doBench(pkgs []*Package, buildflags, testflags []string) error {
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("scanner: %w", err)
 	}
-	if err := <-waitErr; err != nil {
-		// TODO: use ExitError.ExitCode() once we only support 1.12 and later.
-		return fmt.Errorf("wait: %v; output:\n%s", waitErr, errorBuffer.Bytes())
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("test: %v:\n%s", err, errorBuffer.Bytes())
 	}
 	if resultsPrinted == 0 {
 		return fmt.Errorf("got no results; output:\n%s", errorBuffer.Bytes())

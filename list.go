@@ -31,8 +31,6 @@ func listPackages(args, flags []string) ([]*Package, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("list: %w", err)
 	}
-	waitErr := make(chan error, 1)
-	go func() { waitErr <- cmd.Wait() }()
 
 	dec := json.NewDecoder(pr)
 	for {
@@ -44,7 +42,7 @@ func listPackages(args, flags []string) ([]*Package, error) {
 		}
 		pkgs = append(pkgs, &pkg)
 	}
-	if err := <-waitErr; err != nil {
+	if err := cmd.Wait(); err != nil {
 		return nil, fmt.Errorf("list: %v:\n%s", err, stderr.Bytes())
 	}
 	return pkgs, nil
