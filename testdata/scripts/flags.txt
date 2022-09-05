@@ -7,11 +7,11 @@ stderr 'For example' # definitely includes our help text
 ! stderr 'help requested' # don't duplicate usage output
 ! stderr '-test\.' # don't show the test binary's usage func
 
+# unknown flags are passed to the test binary, as they might be new test flags
 ! benchinit -benchtime=10x -badflag
 stderr 'flag provided but not defined'
-stderr 'Usage of benchinit'
-stderr 'For example' # definitely includes our help text
-! stderr '-test\.' # don't show the test binary's usage func
+! stderr 'Usage of benchinit'
+stderr '-test\.'
 
 # missing flag argument
 benchinit -benchtime=10x -cpuprofile
@@ -22,9 +22,19 @@ stdout '^BenchmarkTestTldFoo'
 ! stdout .
 stderr 'nopkg: directory not found'
 
+! benchinit -benchtime=10x -tags=buildtag .
+! stdout .
+stderr 'buildtag panics at init time'
+
 -- go.mod --
 module test.tld/foo
 -- empty.go --
 package foo
 
 func init() {}
+-- buildtag.go --
+//go:build buildtag
+
+package foo
+
+func init() { panic("buildtag panics at init time") }

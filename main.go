@@ -43,80 +43,28 @@ var benchmainSource string
 func main() { os.Exit(main1()) }
 
 func main1() int {
-	// Figure out which flags should be passed on to 'go test'.
-	testflags, rest := lazyFlagParse(os.Args[1:])
+	buildflags, testflags, rest := filterFlags(os.Args[1:])
 	flagSet.Usage = usage
 	if err := flagSet.Parse(rest); err != nil {
-		if err != flag.ErrHelp {
-			fmt.Fprintf(os.Stderr, "flag: %v\n", err)
-			usage()
+		if err == flag.ErrHelp {
+			return 2
 		}
-		return 2
 	}
-	// TODO: forward build flags, but not other test flags
-	pkgs, err := listPackages(nil, flagSet.Args())
+	pkgs, err := listPackages(flagSet.Args(), buildflags)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 
 	// From this point onwards, errors are straightforward.
-	if err := doBench(pkgs, testflags); err != nil {
+	if err := doBench(pkgs, buildflags, testflags); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	return 0
 }
 
-// listPackages is akin to go/packages, but more specific to `go list`.
-// In particular, it helps us reach fields like Dir and Deps.
-// Moreover, by using `go test`, we are tightly coupled with cmd/go already.
-func listPackages(flags, args []string) ([]*Package, error) {
-	// Load the packages.
-	var pkgs []*Package
-	listArgs := []string{"list", "-json"}
-	listArgs = append(listArgs, args...)
-	cmd := exec.Command("go", listArgs...)
-	pr, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("list: %w", err)
-	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("list: %w", err)
-	}
-	waitErr := make(chan error, 1)
-	go func() { waitErr <- cmd.Wait() }()
-
-	dec := json.NewDecoder(pr)
-	for {
-		var pkg Package
-		if err := dec.Decode(&pkg); err == io.EOF {
-			break
-		} else if err != nil {
-			return nil, fmt.Errorf("list: %w", err)
-		}
-		pkgs = append(pkgs, &pkg)
-	}
-	if err := <-waitErr; err != nil {
-		return nil, fmt.Errorf("list: %v:\n%s", err, stderr.Bytes())
-	}
-	return pkgs, nil
-}
-
-type Package struct {
-	Dir        string
-	ImportPath string
-	Name       string
-
-	GoFiles      []string
-	TestGoFiles  []string
-	XTestGoFiles []string
-	Deps         []string
-}
-
-func doBench(pkgs []*Package, testflags []string) error {
+func doBench(pkgs []*Package, buildflags, testflags []string) error {
 	// Prepare the packages to be benchmarked.
 	tmpDir, err := os.MkdirTemp("", "benchinit")
 	if err != nil {
@@ -208,7 +156,8 @@ func doBench(pkgs []*Package, testflags []string) error {
 	}
 
 	// Benchmark the packages with 'go test -bench'.
-	args = append(args, testflags...) // add the user's test args
+	args = append(args, buildflags...) // add the user's build flags
+	args = append(args, testflags...)  // add the user's test flags
 	args = append(args, mainPkg.Dir)
 	cmd := exec.Command("go", args...)
 	pr, pw, err := os.Pipe()
@@ -281,51 +230,6 @@ func doBench(pkgs []*Package, testflags []string) error {
 	return nil
 }
 
-// testFlag is copied from cmd/go/internal/test/testflag.go's testFlagDefn, with
-// small modifications.
-var testFlagDefn = []struct {
-	Name    string
-	BoolVar bool
-}{
-	// local.
-	{Name: "c", BoolVar: true},
-	{Name: "i", BoolVar: true},
-	{Name: "o"},
-	{Name: "cover", BoolVar: true},
-	{Name: "covermode"},
-	{Name: "coverpkg"},
-	{Name: "exec"},
-	{Name: "json", BoolVar: true},
-	{Name: "vet"},
-
-	// Passed to 6.out, adding a "test." prefix to the name if necessary: -v becomes -test.v.
-	{Name: "bench"},
-	{Name: "benchmem", BoolVar: true},
-	{Name: "benchtime"},
-	{Name: "blockprofile"},
-	{Name: "blockprofilerate"},
-	{Name: "count"},
-	{Name: "coverprofile"},
-	{Name: "cpu"},
-	{Name: "cpuprofile"},
-	{Name: "failfast", BoolVar: true},
-	{Name: "list"},
-	{Name: "memprofile"},
-	{Name: "memprofilerate"},
-	{Name: "mutexprofile"},
-	{Name: "mutexprofilefraction"},
-	{Name: "outputdir"},
-	{Name: "parallel"},
-	{Name: "run"},
-	{Name: "short", BoolVar: true},
-	{Name: "timeout"},
-	{Name: "trace"},
-	{Name: "v", BoolVar: true},
-
-	// extra build flags?
-	{Name: "race", BoolVar: true},
-}
-
 var flagSet = flag.NewFlagSet("benchinit", flag.ContinueOnError)
 
 func usage() {
@@ -341,40 +245,4 @@ For example:
 All flags accepted by 'go test', including the benchmarking ones, should be
 accepted. See 'go help testflag' for a complete list.
 `[1:])
-}
-
-// lazyFlagParse is similar to flag.Parse, but keeps 'go test' flags around so
-// they can be passed on. We'll add our own benchinit flags at a later time.
-func lazyFlagParse(args []string) (testflags, rest []string) {
-_args:
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "" || arg == "--" || arg[0] != '-' {
-			rest = append(rest, args[i:]...)
-			break
-		}
-		for _, tflag := range testFlagDefn {
-			if arg[1:] == tflag.Name {
-				if tflag.BoolVar {
-					// e.g. -benchmem
-					testflags = append(testflags, arg)
-					continue _args
-				}
-				next := ""
-				if i+1 < len(args) {
-					i++
-					next = args[i]
-				}
-				testflags = append(testflags, arg, next)
-				continue _args
-			} else if strings.HasPrefix(arg[1:], tflag.Name+"=") {
-				// e.g. -count=10
-				testflags = append(testflags, arg)
-				continue _args
-			}
-		}
-		// Likely one of our flags. Leave it to flagSet.Parse.
-		rest = append(rest, arg)
-	}
-	return testflags, rest
 }
