@@ -117,7 +117,7 @@ func doBench(pkgs []*Package, buildflags, testflags []string) error {
 	const genName = "benchinit_generated_test.go"
 
 	benchmain := benchmainSource
-	benchmain = strings.Replace(benchmain, "package main_test\n", "package "+mainPkg.Name+"_test\n", 1)
+	benchmain = strings.Replace(benchmain, "package main_test", "package "+mainPkg.Name+"_test", 1)
 
 	// for debugging
 	// println("--")
