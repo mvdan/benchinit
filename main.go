@@ -24,7 +24,7 @@ import (
 // TODO: "recursive" should exclude the init cost of "runtime" and its deps,
 // as those can never be avoided as part of a program's init.
 // And the same for "testing" and its deps, given that we run the benchmark as a test binary.
-var recursive = flagSet.Bool("r", false, "include init costs of transitive dependencies")
+var recursive = flagSet.Bool("r", false, "")
 
 // keep benchmain types in sync with benchmain_test.go.
 type benchmainInput struct {
@@ -237,5 +237,10 @@ For example:
 
 All flags accepted by 'go test', including the benchmarking ones, should be
 accepted. See 'go help testflag' for a complete list.
+
+benchinit also accepts the following flags:
+
+	-r
+		include init cost of transitive dependencies
 `[1:])
 }
