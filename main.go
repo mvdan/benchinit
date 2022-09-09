@@ -184,9 +184,10 @@ func doBench(pkgs []*Package, buildflags, testflags []string) error {
 	//	benchinit: BenchmarkGoBuild	1224	5803 ns/op	5059 B/op	45 allocs/op
 	//	continuation: 1224	   961433 ns/op
 	var errorBuffer bytes.Buffer // to print the whole output if we fail
-	var benchinitResult string
+	var benchinitResults []string
+	var benchinitResultsNumber string // e.g. "100"
 	var resultsPrinted int
-	rxBenchinitResult := regexp.MustCompile(`^benchinit: (.*)`)
+	rxBenchinitResult := regexp.MustCompile(`^benchinit: (\w+\s+(\d+).*)`)
 	rxFinalResult := regexp.MustCompile(`^continuation:.*\d\s`)
 
 	// These must be printed directly as-is during normal runs.
@@ -199,14 +200,20 @@ func doBench(pkgs []*Package, buildflags, testflags []string) error {
 	for scanner.Scan() {
 		line := scanner.Text()
 		if match := rxBenchinitResult.FindStringSubmatch(line); match != nil {
-			benchinitResult = match[1]
-		} else if rxFinalResult.MatchString(line) {
-			if benchinitResult == "" {
-				panic("did not find benchinit's result?")
+			number := match[2]
+			if number != benchinitResultsNumber {
+				benchinitResultsNumber = number
+				benchinitResults = benchinitResults[:0]
 			}
-			fmt.Println(benchinitResult)
+			benchinitResults = append(benchinitResults, match[1])
+		} else if rxFinalResult.MatchString(line) {
+			if len(benchinitResults) != len(input.BenchPkgs) {
+				panic("did not find benchinit's results?")
+			}
+			for _, result := range benchinitResults {
+				fmt.Println(result)
+			}
 			resultsPrinted++
-			benchinitResult = ""
 		} else if match := rxPassthrough.FindStringSubmatch(line); match != nil {
 			fmt.Println(match[2])
 		}

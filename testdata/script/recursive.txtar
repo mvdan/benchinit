@@ -1,20 +1,33 @@
-
 exec benchinit -benchtime=10x .
-stdout '^BenchmarkTestTldFoo'
+stdout -count=1 '^BenchmarkTestTldFoo\s'
 stdout '0 B/op\s*0 allocs/op' # doesn't alloc
 
 exec benchinit -r -benchtime=10x .
-stdout '^BenchmarkTestTldFoo'
+stdout -count=1 '^BenchmarkTestTld'
+stdout -count=1 '^BenchmarkTestTldFoo\s'
 ! stdout '0 B/op\s*0 allocs/op' # imported pkg allocs
+
+exec benchinit . ./imported ./notimported
+stdout -count=1 '^BenchmarkTestTldFoo\s'
+stdout -count=1 '^BenchmarkTestTldFooImported\s'
+stdout -count=1 '^BenchmarkTestTldFooNotimported\s'
 
 -- go.mod --
 module test.tld/foo
 -- import.go --
 package foo
 
-import _ "test.tld/foo/bar"
--- bar/alloc.go --
-package bar
+import _ "test.tld/foo/imported"
+-- imported/alloc.go --
+package imported
+
+var Sink []int
+
+func init() {
+	Sink = make([]int, 128)
+}
+-- notimported/alloc.go --
+package notimported
 
 var Sink []int
 
