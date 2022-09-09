@@ -119,6 +119,12 @@ func doBench(pkgs []*Package, buildflags, testflags []string) error {
 	benchmain := benchmainSource
 	benchmain = strings.Replace(benchmain, "package main_test", "package "+mainPkg.Name+"_test", 1)
 
+	var insertImports strings.Builder
+	for _, pkg := range input.BenchPkgs {
+		fmt.Fprintf(&insertImports, "import _ %q\n", pkg.ImportPath)
+	}
+	benchmain = strings.Replace(benchmain, "//go:insert imports", insertImports.String(), 1)
+
 	// for debugging
 	// println("--")
 	// println(benchmain)

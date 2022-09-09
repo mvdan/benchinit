@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-//go:insert imports (TODO: not used yet)
+//go:insert imports
 
 // keep benchmain types in sync with main.go.
 type benchmainInput struct {
