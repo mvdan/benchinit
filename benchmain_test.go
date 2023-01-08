@@ -65,6 +65,12 @@ func BenchmarkGeneratedBenchinit(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		cmd := exec.Command(execPath, "-h")
+
+		// Some Go code will behave slightly differently if it notices it's
+		// running within a Go test, e.g. if os.Args[0] ends with ".test".
+		// Make the execution look more like a regular program.
+		cmd.Args[0] = "main"
+
 		// TODO: do not override existing GODEBUG values
 		cmd.Env = append(os.Environ(), "GODEBUG=inittrace=1")
 		out, err := cmd.CombinedOutput()
