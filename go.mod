@@ -3,8 +3,11 @@ module mvdan.cc/benchinit
 go 1.19
 
 require (
-	github.com/rogpeppe/go-internal v1.9.0
-	golang.org/x/exp v0.0.0-20230310171629-522b1b587ee0
+	github.com/rogpeppe/go-internal v1.11.0
+	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa
 )
 
-require github.com/pkg/diff v0.0.0-20210226163009-20ebb0f2a09e // indirect
+require (
+	golang.org/x/sys v0.14.0 // indirect
+	golang.org/x/tools v0.15.0 // indirect
+)
