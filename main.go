@@ -80,8 +80,12 @@ func doBench(pkgs []*Package, buildflags, testflags []string) error {
 	allPkgs := make(map[string]bool)
 	for _, pkg := range pkgs {
 		allPkgs[pkg.ImportPath] = true
-		for _, dep := range pkg.Deps {
-			allPkgs[dep] = true
+		// When including the costs of transitive dependencies,
+		// we need to collect their init costs as well.
+		if *recursive {
+			for _, dep := range pkg.Deps {
+				allPkgs[dep] = true
+			}
 		}
 
 		input.BenchPkgs = append(input.BenchPkgs, benchmainPackage{
