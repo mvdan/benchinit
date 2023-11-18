@@ -1,7 +1,7 @@
 # benchinit
 
 Benchmark the initialization cost of your packages or programs.
-Requires Go 1.19 or later.
+Requires Go 1.20 or later.
 
 	go install mvdan.cc/benchinit@latest
 

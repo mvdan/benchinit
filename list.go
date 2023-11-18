@@ -95,7 +95,7 @@ var forwardBuildFlags = map[string]bool{
 	"workfile":      true,
 }
 
-// booleanFlags is obtained from 'go help build' and 'go help testflag' as of Go 1.19beta1.
+// booleanFlags is obtained from 'go help build' and 'go help testflag' as of Go 1.21.
 var booleanFlags = map[string]bool{
 	// Global help.
 	"h": true,
@@ -122,6 +122,7 @@ var booleanFlags = map[string]bool{
 	"failfast": true,
 	"short":    true,
 	"benchmem": true,
+	"fullpath": true,
 
 	// benchinit flags
 	"r": true,
