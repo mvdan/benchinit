@@ -75,7 +75,7 @@ func BenchmarkGeneratedBenchinit(b *testing.B) {
 		cmd.Args[0] = "main"
 
 		// TODO: do not override existing GODEBUG values
-		cmd.Env = append(os.Environ(), "GODEBUG=inittrace=1")
+		cmd.Env = append(cmd.Environ(), "GODEBUG=inittrace=1")
 		out, err := cmd.CombinedOutput()
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 2 {
 			// Sometimes -h will result in an exit code 2 rather than 0.
@@ -83,8 +83,7 @@ func BenchmarkGeneratedBenchinit(b *testing.B) {
 			b.Fatalf("%v: %s", err, out)
 		}
 		for _, match := range rxInitTrace.FindAllSubmatch(out, -1) {
-			pkg := string(match[rxIndexPkg])
-			totals := pkgTotals[pkg]
+			totals := pkgTotals[string(match[rxIndexPkg])]
 			if totals == nil {
 				continue // not a package we count, e.g. runtime
 			}

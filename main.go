@@ -176,7 +176,7 @@ func doBench(pkgs []*Package, buildflags, testflags []string) error {
 		return fmt.Errorf("test: %w", err)
 	}
 	cmd.Stderr = cmd.Stdout
-	cmd.Env = append(os.Environ(), "BENCHINIT_JSON_INPUT="+inputPath)
+	cmd.Env = append(cmd.Environ(), "BENCHINIT_JSON_INPUT="+inputPath)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("test: %w", err)
 	}
