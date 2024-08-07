@@ -116,10 +116,14 @@ func BenchmarkGeneratedBenchinit(b *testing.B) {
 			}
 		}
 
-		// Turn "golang.org/x/foo" into "GolangOrgXFoo".
+		// Turn "golang.org/x/foo" into "GolangOrgXFoo",
+		// and "foo.bar/~user/go-baz" into "FooBarUserGoBaz".
 		name := pkg.ImportPath
 		name = strings.ReplaceAll(name, "/", " ")
 		name = strings.ReplaceAll(name, ".", " ")
+		name = strings.ReplaceAll(name, "~", " ")
+		name = strings.ReplaceAll(name, "-", " ")
+		name = strings.ReplaceAll(name, "_", " ")
 		name = strings.Title(name)
 		name = strings.ReplaceAll(name, " ", "")
 
