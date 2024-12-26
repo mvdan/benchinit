@@ -4,7 +4,6 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -13,9 +12,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	os.Exit(testscript.RunMain(m, map[string]func() int{
-		"benchinit": main1,
-	}))
+	testscript.Main(m, map[string]func(){
+		"benchinit": main,
+	})
 }
 
 func TestScripts(t *testing.T) {

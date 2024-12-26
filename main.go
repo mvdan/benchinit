@@ -41,28 +41,21 @@ type benchmainPackage struct {
 //go:embed benchmain_test.go
 var benchmainSource string
 
-func main() { os.Exit(main1()) }
-
-func main1() int {
+func main() {
 	buildflags, testflags, rest := filterFlags(os.Args[1:])
 	flagSet.Usage = usage
-	if err := flagSet.Parse(rest); err != nil {
-		if err == flag.ErrHelp {
-			return 2
-		}
-	}
+	flagSet.Parse(rest)
 	pkgs, err := listPackages(flagSet.Args(), buildflags)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		return 1
+		os.Exit(1)
 	}
 
 	// From this point onwards, errors are straightforward.
 	if err := doBench(pkgs, buildflags, testflags); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		return 1
+		os.Exit(1)
 	}
-	return 0
 }
 
 func doBench(pkgs []*Package, buildflags, testflags []string) error {
@@ -240,10 +233,10 @@ func doBench(pkgs []*Package, buildflags, testflags []string) error {
 	return nil
 }
 
-var flagSet = flag.NewFlagSet("benchinit", flag.ContinueOnError)
+var flagSet = flag.NewFlagSet("benchinit", flag.ExitOnError)
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `
+	fmt.Fprint(os.Stderr, `
 Usage of benchinit:
 
 	benchinit [benchinit flags] [go test flags] [packages]
