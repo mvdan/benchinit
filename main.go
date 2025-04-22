@@ -11,14 +11,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
-
-	"golang.org/x/exp/maps"
 )
 
 // TODO: "recursive" should exclude the init cost of "runtime" and its deps,
@@ -94,7 +94,7 @@ func doBench(pkgs []*Package, buildflags, testflags []string) error {
 		}
 		mainPkg = pkg
 	}
-	input.AllImportPaths = maps.Keys(allPkgs)
+	input.AllImportPaths = slices.Collect(maps.Keys(allPkgs))
 	sort.Strings(input.AllImportPaths)
 
 	if mainPkg == nil {
