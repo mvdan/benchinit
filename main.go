@@ -104,10 +104,10 @@ func doBench(pkgs []*Package, buildflags, testflags []string) error {
 	// Pretend like the main package we use for testing does not have any other
 	// test files, as we are not interested in the init cost of tests.
 	for _, testFile := range mainPkg.TestGoFiles {
-		overlay.Replace[testFile] = ""
+		overlay.Replace[filepath.Join(mainPkg.Dir, testFile)] = ""
 	}
 	for _, testFile := range mainPkg.XTestGoFiles {
-		overlay.Replace[testFile] = ""
+		overlay.Replace[filepath.Join(mainPkg.Dir, testFile)] = ""
 	}
 
 	// Place our template in the main package's directory via the overlay.
