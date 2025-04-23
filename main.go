@@ -17,7 +17,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 )
 
@@ -95,7 +94,7 @@ func doBench(pkgs []*Package, buildflags, testflags []string) error {
 		mainPkg = pkg
 	}
 	input.AllImportPaths = slices.Collect(maps.Keys(allPkgs))
-	sort.Strings(input.AllImportPaths)
+	slices.Sort(input.AllImportPaths)
 
 	if mainPkg == nil {
 		mainPkg = pkgs[0]
