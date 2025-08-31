@@ -63,7 +63,7 @@ func BenchmarkGeneratedBenchinit(b *testing.B) {
 	rxIndexBytes := rxInitTrace.SubexpIndex("bytes")
 	rxIndexAllocs := rxInitTrace.SubexpIndex("allocs")
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		// We only want the test binary to run the init funcs,
 		// so the help flag is one way to stop the main func early.
 		// TODO: we could also use TestMain to stop right away if an env var is set.
